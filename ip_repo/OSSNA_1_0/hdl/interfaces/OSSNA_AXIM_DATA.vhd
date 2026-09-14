@@ -178,7 +178,6 @@ architecture je_pardonne of OSSNA_AXIM_DATA is
     signal read_fifo_empty       : std_logic;
     signal read_fifo_almost_full : std_logic;
     signal read_fifo_data_in     : std_logic_vector(C_M_AXI_DATA_WIDTH-1 downto 0);
-    signal read_fifo_data_out    : std_logic_vector(C_M_AXI_DATA_WIDTH-1 downto 0);
 
     type DMA_STATES is (IDLE,
                         SET_AXI_BURST_LENGTH_0,
@@ -206,7 +205,6 @@ architecture je_pardonne of OSSNA_AXIM_DATA is
     signal DMA_STATE : DMA_STATES;
 
     signal DDRADDR       : integer;
-    signal BRAMADDR      : integer;
     signal BYTESPERWORD  : integer;
     signal TOTALBYTES    : integer;
     signal TOTALWORDS    : integer;
@@ -257,12 +255,6 @@ architecture je_pardonne of OSSNA_AXIM_DATA is
     signal current_burst_bytes : integer;
 
     signal current_write_burst_words : integer;
-    signal write_burst_word_counter : integer;
-
-    signal WORDS_PER_BEAT : integer;
-
-    signal BRAM_DOUT_BUFFER : std_logic_vector(MAX_TARGET_BRAM_DWIDTH-1 downto 0);
-    signal FIFO_DOUT_BUFFER : std_logic_vector(MAX_TARGET_FIFO_DWIDTH-1 downto 0);
 
     signal AXI_WDATA_BUFFER : std_logic_vector(C_M_AXI_DATA_WIDTH-1 downto 0);
     signal AXI_WDATA_READY  : std_logic;
@@ -409,7 +401,6 @@ begin
                 read_fifo_rd_ptr   <= 0;
                 read_fifo_count    <= 0;
                 read_fifo          <= (others => (others => '0'));
-                read_fifo_data_out <= (others=>'0');
             else
                 if DMA_STATE = IDLE then
                     read_fifo_wr_ptr   <= 0;
@@ -422,8 +413,7 @@ begin
                     end if;
 
                     if read_fifo_rd_en = '1' and read_fifo_count > 0 then
-                        read_fifo_rd_ptr <= (read_fifo_rd_ptr + 1) mod FIFO_DEPTH;
-                        --read_fifo_data_out <= read_fifo(read_fifo_rd_ptr);
+                        read_fifo_rd_ptr <= (read_fifo_rd_ptr + 1) mod FIFO_DEPTH;                       
                     end if;
 
                     if (read_fifo_wr_en = '1' and read_fifo_count < FIFO_DEPTH) and not (read_fifo_rd_en = '1' and read_fifo_count > 0) then
@@ -468,7 +458,6 @@ begin
                     when IDLE =>
 
                         DDRADDR       <= to_integer(unsigned(DDR_BASEADDR));
-                        BRAMADDR      <= to_integer(unsigned(BRAM_BASEADDR));
                         TOTALBYTES    <= to_integer(unsigned(TOTAL_BYTES));
 
                         read_fifo_wr_en <= '0';
@@ -808,7 +797,6 @@ begin
                 FIFO_DIN           <= (others => '0');
                 BRAM_DIN           <= (others => '0');
                 TARGET_DIN_BUFFER  <= (others => '0');
-                WORDS_PER_BEAT     <= 0;
                 BRAM_DELAY_CNT     <= 0;
                 OPERATION_DONE     <= '0';
                 AXI_WDATA_READY    <= '0';
@@ -820,7 +808,6 @@ begin
                 BRAM_ADDR_DELAY    <= '0';
 
                 current_write_burst_words <= 0;
-                write_burst_word_counter <= 0;
 
                 SEND_LAST_BEAT <= '0';
 
@@ -841,9 +828,6 @@ begin
                         BRAM_ADDR_INT      <= to_integer(unsigned(BRAM_BASEADDR));
 
                         MANAGER_TOTALWORDS <= to_integer(unsigned(TOTAL_WORDS));
-
-                        BRAM_DOUT_BUFFER <= (others=>'0');
-                        FIFO_DOUT_BUFFER <= (others=>'0');                          
 
                         AXI_WDATA_READY <= '0';
 

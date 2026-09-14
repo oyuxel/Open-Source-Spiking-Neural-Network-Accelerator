@@ -123,6 +123,7 @@ component BRIDGE is
         NMC_NMODEL_FINISHED        : in  std_logic;
         -- SYNAPTIC RAM MANAGEMENT
         SYNMEM_PORTA_MUX           : out std_logic;
+        DISABLE_LENGINE            : out std_logic;
         -- ULEARN CONTROLS
         ACTVATE_LENGINE            : out std_logic;
         LEARN_RST                  : out std_logic;

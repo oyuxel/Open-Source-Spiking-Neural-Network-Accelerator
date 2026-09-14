@@ -37,7 +37,7 @@ entity OSSNA is
 	);
 	port (
 		-- Users to add ports here
-
+        irq                 : out std_logic;
 		-- User ports ends
 		-- Do not modify the ports beyond this line
 
@@ -150,6 +150,9 @@ architecture arch_imp of OSSNA is
         SEED                     : out std_logic_vector(31 downto 0);
         DATA_COUNT               : out std_logic_vector(31 downto 0);
         CONV_DONE                : in  std_logic;
+        SNAPSHOT_TIMESTEP_COUNTER: out std_logic_vector(31 downto 0);
+		CLEAR_SNAPSHOT_INTERRUPT : out std_logic;
+        RESET_SNAPSHOT           : out std_logic;
         SP_RESET                 : out std_logic;
         NETWORK_START_ADDRESS    : out std_logic_vector(31 downto 0);
         TIMESTEP_STARTED         : out std_logic;
@@ -426,6 +429,7 @@ architecture arch_imp of OSSNA is
             SPIKEVECTOR_VLD_OUT         : out std_logic;                     
             READ_MAIN_SPIKE_BUFFER      : out std_logic;
             READ_CIRCULAR_BUFFER        : out std_logic;
+            READ_AUX_BUFFER             : out std_logic;
             EVENT_ACCEPT                : out std_logic;
             SYNAPSE_ROUTE               : in  std_logic; 
             SYNAPTIC_MEM_DIN            : in  SYNAPTICMEMDATA(0 to CROSSBAR_COL_WIDTH-1);
@@ -443,6 +447,7 @@ architecture arch_imp of OSSNA is
             NMC_SPIKE_OUT               : out std_logic_vector(0 to CROSSBAR_COL_WIDTH-1 );
             NMC_SPIKE_OUT_VLD           : out std_logic_vector(0 to CROSSBAR_COL_WIDTH-1 );
             NMC_WR_OUT_BUFFER           : out std_logic;
+            NMC_WR_AUX_BUFFER           : out std_logic;
             LEARN_LUT_DIN               : in  std_logic_vector(7 downto 0);
             LEARN_LUT_ADDR              : in  std_logic_vector(clogb2(LEARNING_ENGINE_LUT_DEPTH)-1 downto 0)   ;
             LEARN_LUT_EN                : in  std_logic;
@@ -467,7 +472,9 @@ architecture arch_imp of OSSNA is
     signal CORE_SPIKEVECTOR_VLD_OUT         : std_logic;                     
     signal CORE_READ_MAIN_SPIKE_BUFFER      : std_logic;
     signal CORE_READ_CIRCULAR_BUFFER        : std_logic;
+    signal CORE_READ_AUX_BUFFER             : std_logic;
     signal CORE_EVENT_ACCEPT                : std_logic;
+    signal GATED_EVENT_ACCEPT               : std_logic;
     signal CORE_SYNAPSE_ROUTE               : std_logic; 
     signal CORE_NMC_XNEVER_BASE             : std_logic_vector(9 downto 0);
     signal CORE_NMC_XNEVER_HIGH             : std_logic_vector(9 downto 0);
@@ -475,6 +482,7 @@ architecture arch_imp of OSSNA is
     signal CORE_NMC_SPIKE_OUT               : std_logic_vector(0 to CROSSBAR_MATRIX_DIMENSIONS-1 );
     signal CORE_NMC_SPIKE_OUT_VLD           : std_logic_vector(0 to CROSSBAR_MATRIX_DIMENSIONS-1 );
     signal CORE_NMC_WR_OUT_BUFFER           : std_logic;
+    signal CORE_NMC_WR_AUX_BUFFER           : std_logic;
     signal CORE_NMC_MATH_ERROR_VEC          : std_logic; 
     signal CORE_NMC_MEM_VIOLATION_VEC       : std_logic;
 
@@ -513,11 +521,36 @@ architecture arch_imp of OSSNA is
     signal D2S_SPIKE_VLD      : std_logic;
     signal D2S_CONV_DONE      : std_logic;
 
+    component SNAPSHOT is
+    Port 
+        ( 
+            SNP_CLK                : in  std_logic;
+            SNP_RST                : in  std_logic;
+            RELEASE_PROCESSOR      : in  std_logic;
+            TIMESTEP_COUNTER       : in  std_logic_vector(31 downto 0);
+            NMC_MATH_ERROR_OCCURED : out std_logic;
+            NMC_MEMORY_VIOLATION   : out std_logic;
+            GLOBAL_TIMESTEP_UPDATE : in  std_logic;
+            MATH_ERROR             : in  std_logic;
+            MEMORY_VIOLATION       : in  std_logic;
+            SHUTDOWN_EVENT_ACCEPT  : out std_logic;
+            INTERRUPT              : out std_logic
+        );
+    end component SNAPSHOT;
+
+    signal SNPSHT_SNP_RST                : std_logic;
+    signal SNPSHT_NMC_MATH_ERROR_OCCURED : std_logic;
+    signal SNPSHT_NMC_MEMORY_VIOLATION   : std_logic;
+    signal SNPSHT_GLOBAL_TIMESTEP_UPDATE : std_logic;
+    signal SNPSHT_SHUTDOWN_EVENT_ACCEPT  : std_logic;
 
     signal CONTROLS_FLUSH_MAIN_BUFFER        : std_logic;
 	signal CONTROLS_FLUSH_AUX_BUFFER         : std_logic;
 	signal CONTROLS_FLUSH_CIRCULAR_BUFFER    : std_logic;
 	signal CONTROLS_FLUSH_OUT_BUFFER      	 : std_logic;
+
+    signal CONTROLS_SNAPSHOT_TIMESTEP_COUNTER: std_logic_vector(31 downto 0);
+	signal CONTROLS_CLEAR_SNAPSHOT_INTERRUPT : std_logic;
 
 ---------------------------------- MAIN SPIKE BUFFER SIGNALS BEGIN -----------------------------------
 ------------------------------------------------------------------------------------------------------
@@ -543,6 +576,13 @@ architecture arch_imp of OSSNA is
       signal CIRCULAR_BUFFER_EMPTY : std_logic;
       signal CIRCULAR_BUFFER_WREN  : std_logic;
 
+      signal AUX_BUFFER_DOUT       : std_logic_vector(CROSSBAR_MATRIX_DIMENSIONS-1 downto 0);
+      signal AUX_BUFFER_DIN        : std_logic_vector(CROSSBAR_MATRIX_DIMENSIONS-1 downto 0);
+      signal AUX_BUFFER_RDEN       : std_logic;
+      signal AUX_BUFFER_FULL       : std_logic;
+      signal AUX_BUFFER_EMPTY      : std_logic;
+      signal AUX_BUFFER_WREN       : std_logic;
+
 ------------------------------------------------------------------------------------------------------
 
 ---------------------------------- OUT SPIKE BUFFER SIGNALS BEGIN -----------------------------------
@@ -567,7 +607,7 @@ architecture arch_imp of OSSNA is
       
       signal SPIKE_STATE : SPIKE_STATES;
       
-      signal READFIFOSELECT : std_logic_vector(1 downto 0);
+      signal READFIFOSELECT : std_logic_vector(2 downto 0);
       
       type FIFOSTATES is (WAITINPUT,WRITE);
       signal FIFOSTATE : FIFOSTATES;
@@ -587,6 +627,22 @@ architecture arch_imp of OSSNA is
 
 
 begin
+
+    SNAPSHOOT : SNAPSHOT 
+    Port Map
+        ( 
+            SNP_CLK                => axim_data_aclk                ,
+            SNP_RST                => SNPSHT_SNP_RST                ,
+            RELEASE_PROCESSOR      => CONTROLS_CLEAR_SNAPSHOT_INTERRUPT  ,
+            TIMESTEP_COUNTER       => CONTROLS_SNAPSHOT_TIMESTEP_COUNTER ,
+            NMC_MATH_ERROR_OCCURED => SNPSHT_NMC_MATH_ERROR_OCCURED ,
+            NMC_MEMORY_VIOLATION   => SNPSHT_NMC_MEMORY_VIOLATION   ,
+            GLOBAL_TIMESTEP_UPDATE => CORE_TIMESTEP_COMPLETED       ,
+            MATH_ERROR             => CORE_NMC_MATH_ERROR_VEC       ,
+            MEMORY_VIOLATION       => CORE_NMC_MEM_VIOLATION_VEC    ,
+            SHUTDOWN_EVENT_ACCEPT  => SNPSHT_SHUTDOWN_EVENT_ACCEPT  ,
+            INTERRUPT              => irq
+        );
 
 OSSNA_CONTROLS : OSSNA_AXIL_CONTROLS
 	generic map (
@@ -627,6 +683,10 @@ OSSNA_CONTROLS : OSSNA_AXIL_CONTROLS
         DATA_COUNT               => D2S_DATA_COUNT ,
         CONV_DONE                => D2S_CONV_DONE ,
 
+        SNAPSHOT_TIMESTEP_COUNTER=> CONTROLS_SNAPSHOT_TIMESTEP_COUNTER ,
+		CLEAR_SNAPSHOT_INTERRUPT => CONTROLS_CLEAR_SNAPSHOT_INTERRUPT  ,
+        RESET_SNAPSHOT           => SNPSHT_SNP_RST ,
+
         SP_RESET                 => CORE_SP_RESET                   ,
         NETWORK_START_ADDRESS    => CORE_NETWORK_START_ADDRESS      ,
         TIMESTEP_STARTED         => CORE_TIMESTEP_STARTED           ,
@@ -636,8 +696,8 @@ OSSNA_CONTROLS : OSSNA_AXIL_CONTROLS
         NMC_XNEVER_BASE          => CORE_NMC_XNEVER_BASE            ,
         NMC_XNEVER_HIGH          => CORE_NMC_XNEVER_HIGH            ,
         NMC_PMODE_SWITCH         => CORE_NMC_PMODE_SWITCH           ,
-        NMC_MATH_ERROR_VEC       => CORE_NMC_MATH_ERROR_VEC         ,
-        NMC_MEM_VIOLATION_VEC    => CORE_NMC_MEM_VIOLATION_VEC      ,
+        NMC_MATH_ERROR_VEC       => SNPSHT_NMC_MATH_ERROR_OCCURED   ,
+        NMC_MEM_VIOLATION_VEC    => CORE_NMC_MATH_ERROR_VEC         ,
 
         FLUSH_MAIN_BUFFER        => CONTROLS_FLUSH_MAIN_BUFFER      ,
 		FLUSH_AUX_BUFFER         => CONTROLS_FLUSH_AUX_BUFFER       ,
@@ -835,6 +895,7 @@ OSSNA_DATA : OSSNA_AXIM_DATA
             SPIKEVECTOR_VLD_OUT         => CORE_SPIKEVECTOR_VLD_OUT        ,
             READ_MAIN_SPIKE_BUFFER      => CORE_READ_MAIN_SPIKE_BUFFER     ,
             READ_CIRCULAR_BUFFER        => CORE_READ_CIRCULAR_BUFFER       ,
+            READ_AUX_BUFFER             => CORE_READ_AUX_BUFFER            ,
             EVENT_ACCEPT                => CORE_EVENT_ACCEPT               ,
             SYNAPSE_ROUTE               => CORE_SYNAPSE_ROUTE              ,
             SYNAPTIC_MEM_DIN            => DATA_MUX_SYNAPTIC_MEM_DIN       ,
@@ -852,6 +913,7 @@ OSSNA_DATA : OSSNA_AXIM_DATA
             NMC_SPIKE_OUT               => CORE_NMC_SPIKE_OUT              ,
             NMC_SPIKE_OUT_VLD           => CORE_NMC_SPIKE_OUT_VLD          ,
             NMC_WR_OUT_BUFFER           => CORE_NMC_WR_OUT_BUFFER          ,
+            NMC_WR_AUX_BUFFER           => CORE_NMC_WR_AUX_BUFFER          ,
             LEARN_LUT_DIN               => DATA_MUX_LEARN_LUT_DIN          ,
             LEARN_LUT_ADDR              => DATA_MUX_LEARN_LUT_ADDR         ,
             LEARN_LUT_EN                => DATA_MUX_LEARN_LUT_EN           ,
@@ -887,6 +949,8 @@ OSSNA_DATA : OSSNA_AXIM_DATA
     	    );
 
     D2S_NEW_TIMESTEP <= CORE_TIMESTEP_COMPLETED;
+
+    GATED_EVENT_ACCEPT <= CORE_EVENT_ACCEPT and SNPSHT_SHUTDOWN_EVENT_ACCEPT;
  
  EVENT_SINK_PROCESS : process(axim_data_aclk)
  
@@ -903,18 +967,17 @@ OSSNA_DATA : OSSNA_AXIM_DATA
                         
                 if CORE_READ_MAIN_SPIKE_BUFFER = '1' and MAIN_SPIKE_BUFFER_EMPTY = '0' then
             
-                    MAIN_SPIKE_BUFFER_RDEN <= MAIN_SPIKE_BUFFER_RDEN xor CORE_EVENT_ACCEPT;
+                    MAIN_SPIKE_BUFFER_RDEN <= MAIN_SPIKE_BUFFER_RDEN xor GATED_EVENT_ACCEPT;
                     
                 else
                 
                     MAIN_SPIKE_BUFFER_RDEN <= '0';
                 
                 end if;
-
                 
-                 if CORE_READ_CIRCULAR_BUFFER = '1' and CIRCULAR_BUFFER_EMPTY = '0' then
+                if CORE_READ_CIRCULAR_BUFFER = '1' and CIRCULAR_BUFFER_EMPTY = '0' then
             
-                    CIRCULAR_BUFFER_RDEN <= CIRCULAR_BUFFER_RDEN xor CORE_EVENT_ACCEPT;
+                    CIRCULAR_BUFFER_RDEN <= CIRCULAR_BUFFER_RDEN xor GATED_EVENT_ACCEPT;
                     
                 else
                 
@@ -922,6 +985,16 @@ OSSNA_DATA : OSSNA_AXIM_DATA
                 
                 end if;               
                 
+                if CORE_READ_AUX_BUFFER = '1' and AUX_BUFFER_EMPTY = '0' then
+            
+                    AUX_BUFFER_RDEN <= AUX_BUFFER_RDEN xor GATED_EVENT_ACCEPT;
+                    
+                else
+                
+                    AUX_BUFFER_RDEN <= '0';
+                
+                end if;  
+
  
             end if;
         
@@ -931,13 +1004,16 @@ OSSNA_DATA : OSSNA_AXIM_DATA
  
  READFIFOSELECT(0) <= CORE_READ_MAIN_SPIKE_BUFFER;
  READFIFOSELECT(1) <= CORE_READ_CIRCULAR_BUFFER;
+ READFIFOSELECT(2) <= CORE_READ_AUX_BUFFER;
  
 
- CORE_SPIKEVECTOR_VLD_IN <= MAIN_SPIKE_BUFFER_RDEN when READFIFOSELECT = "01" else
-                            CIRCULAR_BUFFER_RDEN   when READFIFOSELECT = "10" else
+ CORE_SPIKEVECTOR_VLD_IN <= MAIN_SPIKE_BUFFER_RDEN when READFIFOSELECT = "001" else
+                            CIRCULAR_BUFFER_RDEN   when READFIFOSELECT = "010" else
+                            AUX_BUFFER_RDEN        when READFIFOSELECT = "100" else
                             '0';
- CORE_SPIKEVECTOR_IN     <= MAIN_SPIKE_BUFFER_DOUT when READFIFOSELECT = "01" else 
-                            CIRCULAR_BUFFER_DOUT   when READFIFOSELECT = "10" else 
+ CORE_SPIKEVECTOR_IN     <= MAIN_SPIKE_BUFFER_DOUT when READFIFOSELECT = "001" else 
+                            CIRCULAR_BUFFER_DOUT   when READFIFOSELECT = "010" else 
+                            AUX_BUFFER_DOUT        when READFIFOSELECT = "100" else 
                             (others=>'0');
 
  MAIN_SPIKE_BUFFER : xpm_fifo_async
@@ -1027,6 +1103,44 @@ OSSNA_DATA : OSSNA_AXIM_DATA
 
     CIRCULAR_BUFFER_DIN  <= CORE_SPIKEVECTOR_OUT    ;
     CIRCULAR_BUFFER_WREN <= CORE_SPIKEVECTOR_VLD_OUT;
+
+    AUX_SPIKE_BUFFER : xpm_fifo_async
+   generic map (
+      CASCADE_HEIGHT => 0,            -- DECIMAL
+      CDC_SYNC_STAGES => 2,           -- DECIMAL
+      DOUT_RESET_VALUE => "0",        -- String
+      ECC_MODE => "no_ecc",           -- String
+      EN_SIM_ASSERT_ERR => "warning", -- String
+      FIFO_MEMORY_TYPE => "auto",     -- String
+      FIFO_READ_LATENCY => 1,         -- DECIMAL
+      FIFO_WRITE_DEPTH => 2048,       -- DECIMAL
+      FULL_RESET_VALUE => 0,          -- DECIMAL
+      PROG_EMPTY_THRESH => 10,        -- DECIMAL
+      PROG_FULL_THRESH => 10,         -- DECIMAL
+      RD_DATA_COUNT_WIDTH => 1,       -- DECIMAL
+      READ_DATA_WIDTH => CROSSBAR_MATRIX_DIMENSIONS,          -- DECIMAL
+      READ_MODE => "fwft",             -- String
+      RELATED_CLOCKS => 0,            -- DECIMAL
+      SIM_ASSERT_CHK => 0,            -- DECIMAL; 0=disable simulation messages, 1=enable simulation messages
+      USE_ADV_FEATURES => "0000",     -- String
+      WAKEUP_TIME => 0,               -- DECIMAL
+      WRITE_DATA_WIDTH => CROSSBAR_MATRIX_DIMENSIONS,         -- DECIMAL
+      WR_DATA_COUNT_WIDTH => 1        -- DECIMAL
+   )
+   port map (
+      dout          => AUX_BUFFER_DOUT    ,                                                        
+      empty         => AUX_BUFFER_EMPTY   ,                 
+      full          => AUX_BUFFER_FULL    ,                   
+      din           => AUX_BUFFER_DIN     ,                     
+      injectdbiterr => '0'                       , 
+      injectsbiterr => '0'                       , 
+      rd_clk        => axim_data_aclk                ,               
+      rd_en         => AUX_BUFFER_RDEN    ,                 
+      rst           => CONTROLS_FLUSH_AUX_BUFFER   ,                     
+      sleep         => '0'                       ,                 
+      wr_clk        => axim_data_aclk                ,               
+      wr_en         => AUX_BUFFER_WREN                  
+   );
 
 
     GENERATE_NMC_SPIKE_LATCH : for k in 0 to CROSSBAR_MATRIX_DIMENSIONS-1 generate

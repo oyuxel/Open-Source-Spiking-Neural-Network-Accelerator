@@ -47,6 +47,10 @@ entity OSSNA_AXIL_CONTROLS is
         SEED                     : out std_logic_vector(31 downto 0);
         DATA_COUNT               : out std_logic_vector(31 downto 0);
         CONV_DONE                : in  std_logic;
+		-- Snapshot Control Ports
+		SNAPSHOT_TIMESTEP_COUNTER: out std_logic_vector(31 downto 0);
+		CLEAR_SNAPSHOT_INTERRUPT : out std_logic;
+		RESET_SNAPSHOT           : out std_logic;
 		-- Core Control Ports
         SP_RESET                 : out std_logic;
         NETWORK_START_ADDRESS    : out std_logic_vector(31 downto 0);
@@ -265,10 +269,15 @@ begin
 	FLUSH_CIRCULAR_BUFFER       <= slv_reg24(3); 
 	FLUSH_OUT_BUFFER            <= slv_reg24(4); 
 
+	CLEAR_SNAPSHOT_INTERRUPT    <= slv_reg24(5); 
+	RESET_SNAPSHOT              <= slv_reg24(6); 
+
     slv_reg25(0)                <= TIMESTEP_COMPLETED;
     slv_reg25(1)                <= NMC_MATH_ERROR_VEC; 
     slv_reg25(2)                <= NMC_MEM_VIOLATION_VEC;	
 	slv_reg25(C_S_AXI_DATA_WIDTH-1 downto 3) <= (others=>'0');	
+	
+	SNAPSHOT_TIMESTEP_COUNTER   <= slv_reg26; 
 
 	-- I/O Connections assignments
 

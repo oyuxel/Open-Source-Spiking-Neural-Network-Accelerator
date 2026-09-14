@@ -32,6 +32,7 @@ entity SPIKE_PROCESSOR is
             SPIKEVECTOR_VLD_OUT         : out std_logic;                     
             READ_MAIN_SPIKE_BUFFER      : out std_logic;
             READ_CIRCULAR_BUFFER        : out std_logic;
+            READ_AUX_BUFFER             : out std_logic;
             -- EVENT ACCEPTANCE
             EVENT_ACCEPT                : out std_logic;
             -- SYNAPSE RECYCLE OR EXTERNAL ACCESS
@@ -55,6 +56,7 @@ entity SPIKE_PROCESSOR is
             NMC_SPIKE_OUT               : out std_logic_vector(0 to CROSSBAR_COL_WIDTH-1 );
             NMC_SPIKE_OUT_VLD           : out std_logic_vector(0 to CROSSBAR_COL_WIDTH-1 );
             NMC_WR_OUT_BUFFER           : out std_logic;
+            NMC_WR_AUX_BUFFER           : out std_logic;
              -- ULEARN LUT TIED TO ALL LEARNING ENGINES
             LEARN_LUT_DIN               : in  std_logic_vector(7 downto 0);
             LEARN_LUT_ADDR              : in  std_logic_vector(clogb2(LEARNING_ENGINE_LUT_DEPTH)-1 downto 0)   ;
@@ -119,8 +121,10 @@ architecture restless_and_wild of SPIKE_PROCESSOR is
     signal BRIDGE_EVENT_ACCEPT               : std_logic_vector(0 to CROSSBAR_COL_WIDTH-1);
     signal BRIDGE_READ_MAIN_SPIKE_BUFFER     : std_logic_vector(0 to CROSSBAR_COL_WIDTH-1);
     signal BRIDGE_READ_CIRCULAR_BUFFER       : std_logic_vector(0 to CROSSBAR_COL_WIDTH-1);
+    signal BRIDGE_READ_AUX_BUFFER            : std_logic_vector(0 to CROSSBAR_COL_WIDTH-1);
 
     signal BRIDGE_WRITE_OUTBUFFER            : std_logic_vector(0 to CROSSBAR_COL_WIDTH-1);
+    signal BRIDGE_WRITE_AUXBUFFER            : std_logic_vector(0 to CROSSBAR_COL_WIDTH-1);
 
     signal BRIDGE_HALT_CROSSBAR              : std_logic_vector(0 to CROSSBAR_COL_WIDTH-1);
 
@@ -355,7 +359,9 @@ end generate PARAMETER_MEMORY;
     EVENT_ACCEPT           <= and BRIDGE_EVENT_ACCEPT;
     READ_MAIN_SPIKE_BUFFER <= and BRIDGE_READ_MAIN_SPIKE_BUFFER; 
     READ_CIRCULAR_BUFFER   <= and BRIDGE_READ_CIRCULAR_BUFFER; 
+    READ_AUX_BUFFER        <= and BRIDGE_READ_AUX_BUFFER; 
     NMC_WR_OUT_BUFFER      <= and BRIDGE_WRITE_OUTBUFFER; 
+    
     TIMESTEP_COMPLETED_REG <= and TIMESTEP_COMPLETED_VEC; 
 
     NMC_MATH_ERROR_VEC     <= or NMC_MATH_ERROR_VECTOR;
