@@ -361,7 +361,7 @@ end generate PARAMETER_MEMORY;
     READ_CIRCULAR_BUFFER   <= and BRIDGE_READ_CIRCULAR_BUFFER; 
     READ_AUX_BUFFER        <= and BRIDGE_READ_AUX_BUFFER; 
     NMC_WR_OUT_BUFFER      <= and BRIDGE_WRITE_OUTBUFFER; 
-    
+    NMC_WR_AUX_BUFFER      <= and BRIDGE_WRITE_AUXBUFFER;
     TIMESTEP_COMPLETED_REG <= and TIMESTEP_COMPLETED_VEC; 
 
     NMC_MATH_ERROR_VEC     <= or NMC_MATH_ERROR_VECTOR;
@@ -389,7 +389,9 @@ BRIDGES : for i in 0 to CROSSBAR_COL_WIDTH-1 generate
         
             READ_MAIN_SPIKE_BUFFER     => BRIDGE_READ_MAIN_SPIKE_BUFFER(i)         ,
             READ_CIRCULAR_BUFFER       =>  BRIDGE_READ_CIRCULAR_BUFFER(i)           ,
+            READ_AUX_BUFFER            =>  BRIDGE_READ_AUX_BUFFER(i)        ,
             WRITE_OUTBUFFER            => BRIDGE_WRITE_OUTBUFFER(i)                ,
+            WRITE_AUXBUFFER            => BRIDGE_WRITE_AUXBUFFER(i)                ,
 
             SYNAPTIC_MEM_RDADDR        => BRIDGE_2_SYNAPTIC_MEM_ADDR(i)(clogb2(SYNAPSE_MEM_DEPTH)-1 downto 0)         ,
             SYNAPTIC_MEM_ENABLE        => BRIDGE_2_SYNAPTIC_MEM_EN(i)           ,

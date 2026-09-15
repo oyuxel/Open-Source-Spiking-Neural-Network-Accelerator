@@ -607,7 +607,8 @@ architecture arch_imp of OSSNA is
       
       signal SPIKE_STATE : SPIKE_STATES;
       
-      signal READFIFOSELECT : std_logic_vector(2 downto 0);
+      signal READFIFOSELECT  : std_logic_vector(2 downto 0);
+      signal WRITEFIFOSELECT : std_logic_vector(1 downto 0);
       
       type FIFOSTATES is (WAITINPUT,WRITE);
       signal FIFOSTATE : FIFOSTATES;
@@ -1025,7 +1026,7 @@ OSSNA_DATA : OSSNA_AXIM_DATA
       EN_SIM_ASSERT_ERR   => "warning", -- String
       FIFO_MEMORY_TYPE    => "auto",     -- String
       FIFO_READ_LATENCY   => 1,         -- DECIMAL
-      FIFO_WRITE_DEPTH    => 8192,       -- DECIMAL
+      FIFO_WRITE_DEPTH    => 2048,       -- DECIMAL
       FULL_RESET_VALUE    => 0,          -- DECIMAL
       PROG_EMPTY_THRESH   => 10,        -- DECIMAL
       PROG_FULL_THRESH    => 10,         -- DECIMAL
@@ -1272,11 +1273,21 @@ OSSNA_DATA : OSSNA_AXIM_DATA
                  
      end process FIFO_WRCNTROLS;
 
-      OUT_SPIKE_BUFFER_DIN(CROSSBAR_MATRIX_DIMENSIONS-1 downto 0)  <= NMC_SPIKE_OUT_LATCH_DELAY;
+    OUT_SPIKE_BUFFER_DIN(CROSSBAR_MATRIX_DIMENSIONS-1 downto 0)  <= NMC_SPIKE_OUT_LATCH_DELAY when CORE_NMC_WR_OUT_BUFFER = '1' else
+                                                                    (others=>'0');
 
-      OUT_SPIKE_BUFFER_WREN <= CORE_NMC_WR_OUT_BUFFER and WRITESPIKES ;
 
-    
+    OUT_SPIKE_BUFFER_WREN <= WRITESPIKES when CORE_NMC_WR_OUT_BUFFER = '1' else
+                             '0';
+
+    AUX_BUFFER_DIN(CROSSBAR_MATRIX_DIMENSIONS-1 downto 0)  <= NMC_SPIKE_OUT_LATCH_DELAY when CORE_NMC_WR_AUX_BUFFER = '1' else
+                                                                    (others=>'0');
+
+
+    AUX_BUFFER_WREN <= WRITESPIKES when CORE_NMC_WR_AUX_BUFFER = '1' else
+                             '0';
+
+
 OUT_SPIKE_BUFFER :  xpm_fifo_async
    generic map (
       CASCADE_HEIGHT => 0,            -- DECIMAL

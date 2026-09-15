@@ -154,3 +154,16 @@ class OssnaDriver(DefaultIP):
         self.slaves.summary()
 
         return self.slaves
+
+    # driver.py içine eklenebilecek Snapshot yardımcıları:
+    def set_snapshot_interval(self, timesteps: int):
+        """Snapshot aralığını ayarlar. 0 verilirse kesme devre dışı kalır."""
+        self.write32(Regs.ADDR_SNAPSHOT_TIMESTEP_COUNTER, timesteps)
+
+    def clear_snapshot_interrupt(self):
+        """Snapshot kesmesini temizler (Pulse üretir)."""
+        self.pulse_bit(Regs.ADDR_CORE_RESET_FLUSH, CoreResetMask.CLEAR_SNAPSHOT_IRQ_MASK, hold_us=1.0)
+
+    def reset_snapshot_engine(self):
+        """Snapshot sayacını ve modülünü sıfırlar."""
+        self.pulse_bit(Regs.ADDR_CORE_RESET_FLUSH, CoreResetMask.RESET_SNAPSHOT_MASK, hold_us=1.0)

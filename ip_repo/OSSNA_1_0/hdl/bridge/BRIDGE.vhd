@@ -45,8 +45,10 @@ entity BRIDGE is
         -- EVENT ACCEPTANCE
         READ_MAIN_SPIKE_BUFFER     : out std_logic;
         READ_CIRCULAR_BUFFER       : out std_logic;
+        READ_AUX_BUFFER            : out std_logic;
         -- SPIKE DESTINATION
         WRITE_OUTBUFFER            : out std_logic;
+        WRITE_AUXBUFFER            : out std_logic;
         -- SYNAPTIC MEMORY CONTROLS (PORT B)
         SYNAPTIC_MEM_RDADDR        : out std_logic_vector((clogb2(SYNAPSE_MEM_DEPTH)-1) downto 0);
         SYNAPTIC_MEM_ENABLE        : out std_logic;
@@ -118,6 +120,17 @@ architecture crush_with_eyeliner of BRIDGE is
     constant ULEARNLOWSYNADDR     : std_logic_vector(3 downto 0) := "1000";
     constant ULEARNHIGHSYNADDR    : std_logic_vector(3 downto 0) := "1001";
     constant ENDFLOW              : std_logic_vector(3 downto 0) := "1010";
+
+    -- SSSDSYNQ            "1"
+    -- SYNHIGH "2"
+    -- SYNLOW "3"
+    -- PFLOWRFPLST "4"
+    -- NPADDRDATA "5"
+    -- ULEARNPARAMS "6"
+    -- TABLELOWLRATE "7"
+    -- ULEARNLOWSYNADDR "8"
+    -- ULEARNHIGHSYNADDR "9"
+    -- ENDFLOW "10"
     
     signal  MEMLOC                : integer;
     
@@ -185,7 +198,9 @@ MSM : process (BRIDGE_CLK) begin
                         GT_COMPLETED               <= '0'; 
                         READ_MAIN_SPIKE_BUFFER     <= '0'; 
                         READ_CIRCULAR_BUFFER       <= '0'; 
+                        READ_AUX_BUFFER            <= '0';
                         WRITE_OUTBUFFER            <= '0'; 
+                        WRITE_AUXBUFFER            <= '0';
                         SYNAPTIC_MEM_ENABLE        <= '0'; 
                         SYNAPTIC_MEM_WREN          <= '0'; 
                         HALT_HYPERCOLUMN           <= '0'; 

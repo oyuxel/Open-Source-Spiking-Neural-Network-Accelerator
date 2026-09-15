@@ -92,8 +92,10 @@ component BRIDGE is
         -- EVENT ACCEPTANCE
         READ_MAIN_SPIKE_BUFFER     : out std_logic;
         READ_CIRCULAR_BUFFER       : out std_logic;
+        READ_AUX_BUFFER             : out std_logic;
+        WRITE_OUTBUFFER             : out std_logic;
+        WRITE_AUXBUFFER             : out std_logic;
         -- SPIKE DESTINATION
-        WRITE_OUTBUFFER            : out std_logic;
         -- SYNAPTIC MEMORY CONTROLS (PORT B)
         SYNAPTIC_MEM_RDADDR        : out std_logic_vector((clogb2(SYNAPSE_MEM_DEPTH)-1) downto 0);
         SYNAPTIC_MEM_ENABLE        : out std_logic;
