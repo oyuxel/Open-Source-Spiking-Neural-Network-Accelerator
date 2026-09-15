@@ -22,6 +22,11 @@ from .nmc_compiler import Neuron, NMCCompiler, HalfPrecision2Bin
 from .nmc_assembler import NModelAssembler
 
 # sw/ossna/__init__.py içine ekleyin:
+from .synapse import Synapse, SynapseCompiler
+
+# __all__ listesine ekleyin:
+
+# sw/ossna/__init__.py içine ekleyin:
 from .slaves import (
     SlaveRegistry, 
     SlaveDescriptor, 
@@ -52,6 +57,9 @@ __all__ = [
     "HalfPrecision2Bin",
     # Assembler
     "NModelAssembler",
+    # STDP
+    "Synapse", 
+    "SynapseCompiler",
     # Slaves
     "SlaveRegistry", 
     "SlaveDescriptor", 

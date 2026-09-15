@@ -1,46 +1,41 @@
-# ossna/compiler.py
-
 import re
 import struct
 
-# --- Token Tanımları ---
+# --- Token Definition ---
 class Token:
     def __init__(self, type, value):
         self.type = type
         self.value = value
 
-# --- AST (Abstract Syntax Tree) Düğümleri ---
+# --- AST (Abstract Syntax Tree) Nodes ---
 class ASTNode: pass
-
 class BinOp(ASTNode):
     def __init__(self, left, op, right):
         self.left = left
         self.op = op
         self.right = right
-
 class Exponent(ASTNode):
     def __init__(self, base, power):
         self.base = base
         self.power = power
-
 class Neg(ASTNode):
     def __init__(self, node):
         self.node = node
-
 class Num(ASTNode):
     def __init__(self, value):
         self.value = value
-
 class Var(ASTNode):
     def __init__(self, name):
         self.name = name
-
 class FuncCall(ASTNode):
     def __init__(self, name, arg):
         self.name = name
         self.arg = arg
 
-# --- Yardımcı Polinom ve Çarpım Fonksiyonları ---
+# --- Helper Multiplication & Polynomial Functions ---
+def is_accumulator(name):
+    return name.lower() in ["i_syn", "acc"]
+
 def multiply_expanded_lists(l1, l2):
     result = []
     for t1 in l1:
@@ -62,7 +57,7 @@ def make_poly_ast(coeffs, arg_node):
             term_node = BinOp(Num(str(abs_coeff)), "*", arg_node)
         else:
             term_node = BinOp(Num(str(abs_coeff)), "*", Exponent(arg_node, power))
-
+        
         if node_sum is None:
             node_sum = Neg(term_node) if coeff < 0 else term_node
         else:
@@ -70,7 +65,7 @@ def make_poly_ast(coeffs, arg_node):
             node_sum = BinOp(node_sum, op, term_node)
     return node_sum
 
-# --- Sembolik Genişletme Motoru ---
+# --- Symbolic Expansion Engine ---
 def expand_ast(node):
     if isinstance(node, Num):
         return [{"sign": "+", "factors": [node.value]}]
@@ -92,7 +87,7 @@ def expand_ast(node):
     elif isinstance(node, BinOp):
         left_expanded = expand_ast(node.left)
         right_expanded = expand_ast(node.right)
-
+        
         if node.op == "+":
             return left_expanded + right_expanded
         elif node.op == "-":
@@ -108,7 +103,7 @@ def expand_ast(node):
             for term in left_expanded:
                 term["factors"].append(f"{denom_name}_recip")
             return left_expanded
-
+            
     elif isinstance(node, FuncCall):
         if node.name == "tan":
             raise ValueError(
@@ -140,7 +135,7 @@ def expand_ast(node):
             return expand_ast(log10_ast)
         else:
             raise ValueError(f"Compiler Error: Unsupported function name: '{node.name}'")
-
+            
     raise NotImplementedError("Unknown AST node type")
 
 # --- Lexer ---
@@ -254,34 +249,33 @@ class Parser:
             self.consume()
             return self.primary()
         else:
-            raise SyntaxError(f"Unexpected character: {token.value}")
+            raise SyntaxError(f"Geçersiz karakter: {token.value}")
 
 def HalfPrecision2Bin(float_num):
-    """32-bit float sayıyı 16-bit IEEE 754 Half Precision tam sayıya dönüştürür."""
     float_num = float(float_num)
     single_precision = struct.pack('>f', float_num)
-    single_as_int = struct.unpack('>I', single_precision)[0]
+    single_as_int = struct.unpack('>I', single_precision)[0] 
     sign = (single_as_int >> 31) & 0x1
     exp = (single_as_int >> 23) & 0xFF
     mantissa = single_as_int & 0x7FFFFF
-
+    
     if float_num == 0.0:
         return 0
-
+        
     new_exp = max(0, min(31, (exp - 127 + 15)))
     new_mantissa = mantissa >> 13
     half_precision = (sign << 15) | (new_exp << 10) | new_mantissa
     return half_precision
 
-# --- Temel Sınıflar ---
+# --- Temel Yapılar ---
 class Neuron:
-    """NMC için Nöron Modeli Tanımı"""
-    def __init__(self, inputs_list=None, param_list=None, const_list=None, body=None, logic=None):
+    def __init__(self, inputs_list=None, param_list=None, const_list=None, body=None, logic=None, dt=None):
         self.Inputs = inputs_list if inputs_list else []
         self.Paramlist = param_list if param_list else []
         self.Constlist = const_list if const_list else []
         self.Body = body if body else []
         self.Logic = logic if logic else ""
+        self.dt = dt     # Sayısal entegrasyon zaman adımı (Örn: 0.78125 ms)
 
 class LogicNode:
     def __init__(self, block_type, condition=None, level=0):
@@ -294,19 +288,18 @@ class LogicNode:
 
 # --- Derleyici Sınıfı ---
 class NMCCompiler:
-    """Nöron Modellerini Donanım Assembly Koduna ve SRAM İkili Bellek Haritasına Derler."""
     def __init__(self, neuron: Neuron):
         self.neuron = neuron
         self.memory_map = {}
         self.register_map = {}
         self.assembly_code = []
         self.acc_count = 0
-
+        
         self.param_names = []
         self.param_values = {}
         self.const_names = []
         self.const_values = {}
-
+        
         self.optimized_body_equations = []
         self.folded_constant_counter = 0
 
@@ -317,49 +310,35 @@ class NMCCompiler:
                     NMC NEUROMORPHIC COMPILER - HELP GUIDE
 ================================================================================
 
-1. MULTI-SYNAPTIC INPUTS
+1. CONTINUOUS DIFFERENTIAL EQUATIONS (ODE SOLVER)
 --------------------------------------------------------------------------------
-* Pre-synaptic inputs are defined in 'Inputs' list (e.g. ["I_exc", "I_inh"]).
-* Inputs are mapped to the very beginning of the SRAM memory, starting from M(0).
-* The compiler automatically reserves the first N slots for these inputs.
-* Note: A neuron must have at least one input defined in 'Inputs', or a compile-time
-  ValueError will be thrown.
+* You can write continuous ODEs directly in the Body:
+  - Form 1: 'dV/dt = RHS'
+  - Form 2: 'tau * dV/dt = RHS'
+* Time step must be set on the neuron (e.g. neuron.dt = 0.78125).
+* The compiler automatically discretizes the equation using Forward Euler into 
+  'V_next = V + (dt/tau) * (RHS)', folds all constants, and produces optimized code.
 
-2. SUPPORTED MATHEMATICAL OPERATIONS & SYNTAX
+2. MULTI-SYNAPTIC INPUTS
+--------------------------------------------------------------------------------
+* Pre-synaptic inputs are defined in 'Inputs' list (e.g. ["g_e", "g_i"]).
+* Inputs are mapped to the very beginning of the SRAM memory, starting from M(0).
+* Note: A neuron must have at least one input defined in 'Inputs'.
+
+3. SUPPORTED MATHEMATICAL OPERATIONS & SYNTAX
 --------------------------------------------------------------------------------
 * Basic Arithmetic: '+', '-', '*', '/' are fully supported.
-* Division Constraint (Division Rule): Dynamic variables in 'Paramlist' CANNOT be
-  used as divisors (on the right side of '/'). Only 'Constlist' values can.
-* Exponentiation (**): Any integer power (e.g., 'v**2', 'u**20') is supported and
-  expanded into flat multiplication terms.
-* Transcendental Functions:
-  - exp(x)   -> Taylor expansion (5th degree polynomial).
-  - sin(x)   -> Taylor expansion (5th degree polynomial).
-  - cos(x)   -> Taylor expansion (6th degree polynomial).
-  - ln(x)    -> Taylor expansion (5th degree around x = u - 1).
-  - log10(x) -> Translated to 0.43429448 * ln(u).
-* Restrictions:
-  - tan(x)   -> Strictly prohibited due to dynamic Division Rule limits; throws error.
+* Division Constraint (Division Rule): Dynamic variables CANNOT be used as divisors.
+* Exponentiation (**): Any integer power (e.g., 'v**2', 'u**20') is supported.
+* Transcendental Functions: exp(x), sin(x), cos(x), ln(x), log10(x) (Taylor series).
+* Restrictions: tan(x) is strictly prohibited due to dynamic division limits.
 
-3. LOGIC BLOCK & REFRACTORY PERIOD SYNTAX
+4. LOGIC BLOCK & REFRACTORY PERIOD SYNTAX
 --------------------------------------------------------------------------------
 * Indentation-based nested-if logic structures are supported.
 * Comparison operators: '>', '<', '>=', '<=', '=', '!=', '=='
-* Refractory Period Instruction:
-  - Use 'ref_period = N' inside the Logic block (where 0 <= N <= 127).
-  - This compiles directly to the hardware 'strf, N' command, locking the
-    neuron state in a refractory period for N cycles.
-* Inline Comments:
-  - Inside the Logic block, inline comments starting with '#' are fully supported.
-
-4. COMPILER OPTIMIZATIONS
---------------------------------------------------------------------------------
-* Constant Folding: Constant sub-expressions (e.g., h * v_rest / taum) are pre-folded
-  into a single compound '_K' constant at compile-time.
-* Memory Footprint Pruning: Unused constants and temporary expansion variables are
-  purged from the final SRAM image to minimize memory footprints.
-* Single Exit Point: All nested execution paths jump to a single terminal 'ret'
-  instruction to optimize code density and instruction footprint.
+* Refractory Period Instruction: 'ref_period = N' (where 0 <= N <= 127).
+* Inline comments starting with '#' are fully supported.
 
 ================================================================================
         NMC Compiler is fully optimized for minimal SRAM & hardware designs.
@@ -395,17 +374,59 @@ class NMCCompiler:
             self.const_names.append(name)
             self.const_values[name] = val
 
+    def preprocess_differential_equations(self):
+        """
+        Diferansiyel denklemleri (tau * dV/dt = RHS veya dV/dt = RHS) tarar;
+        İleri Euler yöntemiyle sembolik olarak V_next = V + (dt/tau) * (RHS) formuna dönüştürür.
+        """
+        processed_body = []
+        for eq in self.neuron.Body:
+            if "=" not in eq:
+                processed_body.append(eq)
+                continue
+            lhs, rhs = eq.split("=", 1)
+            lhs_clean = lhs.replace(" ", "")
+
+            # d<Var>/dt veya coeff * d<Var>/dt desenini yakala
+            match_ode = re.match(r'^(?:(.*)\*)?\s*d([a-zA-Z_][a-zA-Z0-9_]*)/dt$', lhs_clean)
+            if match_ode:
+                coeff = match_ode.group(1)
+                var = match_ode.group(2)
+
+                if self.neuron.dt is None:
+                    raise ValueError(
+                        f"Compiler Error: Differential equation detected for '{var}' ('{lhs.strip()}'), "
+                        "but time step 'dt' is not defined on the Neuron! (e.g., neuron.dt = 0.78125)"
+                    )
+
+                dt_val = float(self.neuron.dt)
+                
+                # İleri Euler Dönüşümü: X_next = X + (dt / coeff) * (RHS)
+                if coeff:
+                    discrete_eq = f"{var}_next = {var} + ({dt_val} / {coeff}) * ({rhs.strip()})"
+                else:
+                    discrete_eq = f"{var}_next = {var} + ({dt_val}) * ({rhs.strip()})"
+                
+                processed_body.append(discrete_eq)
+            else:
+                processed_body.append(eq)
+
+        return processed_body
+
     def optimize_and_fold_constants(self):
         self.parse_lists_and_extract_values()
         self.optimized_body_equations = []
         self.folded_constant_counter = 0
 
-        for eq in self.neuron.Body:
+        # Diferansiyel denklemleri otomatik olarak cebirsel fark denklemlerine dönüştür
+        effective_body = self.preprocess_differential_equations()
+
+        for eq in effective_body:
             if "=" not in eq:
                 continue
             target_var, rhs_expr = eq.split("=")
             target_var = target_var.strip()
-
+            
             tokens = tokenize(rhs_expr)
             parser = Parser(tokens)
             ast_root = parser.parse()
@@ -428,6 +449,7 @@ class NMCCompiler:
                     elif f.endswith("_recip"):
                         base_const = f[:-6]
                         if base_const in self.const_names or re.match(r'^-?\d+(?:\.\d+)?$', base_const):
+                            # Erken Sıfıra Bölme Koruması
                             base_val = self.const_values[base_const] if base_const in self.const_names else float(base_const)
                             if base_val == 0.0:
                                 raise ZeroDivisionError(
@@ -446,6 +468,7 @@ class NMCCompiler:
                     else:
                         dynamic_elements.append(f)
 
+                # Constant Folding
                 if len(constant_elements) > 1:
                     folded_val = 1.0
                     for elem in constant_elements:
@@ -648,6 +671,7 @@ class NMCCompiler:
     def build_memory_and_registers(self):
         self.optimize_and_fold_constants()
 
+        # Budama (Referans Kontrolü)
         referenced_symbols = set()
         for line in self.neuron.Logic.split('\n'):
             words = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', line)
@@ -660,34 +684,37 @@ class NMCCompiler:
                 for elem in term["elements"]:
                     referenced_symbols.add(elem)
 
+        # 1. INPUTS Adresleme: Her zaman M(0)'dan başlar
         idx = 0
         for inp in self.neuron.Inputs:
             self.memory_map[inp] = idx
             idx += 1
 
+        # 2. 1.0 Sabiti: Girişlerden hemen sonraki adrese kaydırılır
         self.memory_map["1.0"] = idx
         self.register_map["1.0"] = "x1"
         idx += 1
 
+        # Sadece kullanılan dinamik parametreleri ekle
         for param in self.param_names:
             if param in referenced_symbols:
                 if param not in self.memory_map:
                     self.memory_map[param] = idx
                     idx += 1
 
+        # Sadece kullanılan sabitleri ekle (Optimizasyon sonucu elenenler yazılmaz)
         for const in self.const_names:
-
             if const in referenced_symbols:
                 if const not in self.memory_map:
                     self.memory_map[const] = idx
                     idx += 1
-            
-            recip_name = f"{const}_recip"
-            if recip_name in referenced_symbols:
-                if recip_name not in self.memory_map:
-                    self.memory_map[recip_name] = idx
-                    idx += 1
+                recip_name = f"{const}_recip"
+                if recip_name in referenced_symbols:
+                    if recip_name not in self.memory_map:
+                        self.memory_map[recip_name] = idx
+                        idx += 1
 
+        # Gövdedeki hedef değişkenleri ekleme
         for eq in self.optimized_body_equations:
             target = eq["target"]
             if target not in self.memory_map:
@@ -704,6 +731,7 @@ class NMCCompiler:
             self.memory_map["TEMP_ACC"] = idx
             idx += 1
 
+        # Sayısal sabitleri bellek haritasına kaydet (Sıralı literaller ile %100 deterministik build)
         for symbol in sorted(referenced_symbols):
             if re.match(r'^-?\d+(?:\.\d+)?$', symbol):
                 if symbol not in self.memory_map:
@@ -713,10 +741,11 @@ class NMCCompiler:
     def parse_and_compile_body(self):
         for i, eq in enumerate(self.optimized_body_equations):
             target_var = eq["target"]
-
+            
+            # Her yeni denkleme başlarken akümülatörü sıfırla
             if i > 0:
                 self.assembly_code.append("clracc")
-
+                
             for signed_term in eq["terms"]:
                 sign = signed_term["sign"]
                 elements = signed_term["elements"]
@@ -749,7 +778,7 @@ class NMCCompiler:
                         self.assembly_code.append("gacc,x2")
                         self.assembly_code.append("clracc")
                         self.assembly_code.append(f"lw,x3,{self.memory_map[elem]}")
-                        self.assembly_code.append("fmac,x2,x3")
+                        self.assembly_code.append(f"fmac,x2,x3")
 
                     self.assembly_code.append("gacc,x3")
                     self.assembly_code.append(f"lw,x2,{self.memory_map['TEMP_ACC']}")
@@ -764,24 +793,28 @@ class NMCCompiler:
         num_slots = max(self.memory_map.values()) + 1
         raw_values = [0.0] * num_slots
 
+        # 1. Inputs (Başlangıçta 0.0)
         for inp in self.neuron.Inputs:
             if inp in self.memory_map:
                 idx = self.memory_map[inp]
                 raw_values[idx] = 0.0
 
+        # 2. 1.0 Constant
         raw_values[self.memory_map["1.0"]] = 1.0
 
+        # 3. Paramlist Assignments
         for param in self.param_names:
             if param in self.memory_map:
                 idx = self.memory_map[param]
                 raw_values[idx] = self.param_values.get(param, 0.0)
 
+        # 4. Constlist Assignments
         for const in self.const_names:
             val = self.const_values.get(const, 0.0)
             if const in self.memory_map:
                 idx = self.memory_map[const]
                 raw_values[idx] = val
-
+                
             recip_name = f"{const}_recip"
             if recip_name in self.memory_map:
                 recip_idx = self.memory_map[recip_name]
@@ -813,7 +846,7 @@ class NMCCompiler:
                 "Compiler Error: Neuron has no inputs defined. "
                 "A neuromorphic neuron must have at least one input defined in 'Inputs'!"
             )
-
+            
         self.build_memory_and_registers()
 
         self.assembly_code.append("clracc")
