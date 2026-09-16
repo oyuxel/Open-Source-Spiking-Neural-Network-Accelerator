@@ -149,7 +149,7 @@ class NetworkCompiler:
             m = layer.neuron_model
             m_id = id(m)
             if m_id not in model_pflow_start:
-                # Compile NMC Assembly using base offset to prevent footprint collision!
+                # Compile NMC Assembly using base offset to prevent footprint collision
                 nmc_comp = NMCCompiler(m, base_offset=current_scratchpad_offset)
                 asm_code = nmc_comp.compile()
                 bytecode = NModelAssembler(asm_code)
@@ -242,15 +242,23 @@ class NetworkCompiler:
                     # A) REAL ACTIVE NEURON
                     # =========================================================
                     if neuron_in_layer < layer.size:
-                        # 1. Weights to Synapse BRAM
-                        w_column = layer.weights[:, neuron_in_layer]
-                        syn_low = syn_addr_ptrs[col]
-                        syn_high = syn_low + len(w_column) - 1
                         
-                        synapse_brams[col].extend(w_column.astype(np.uint16).tolist())
+                        # -----------------------------------------------------
+                        # Format: [15:8] = Weight (INT8), [7:0] = Trace (0x7F = 127)
+                        # -----------------------------------------------------
+                        w_raw = layer.weights[:, neuron_in_layer].astype(np.uint16)
+                        
+                        w_packed = ((w_raw & 0xFF) << 8) | 0x7F
+                        
+                        syn_low = syn_addr_ptrs[col]
+                        syn_high = syn_low + len(w_packed) - 1
+                        
+                        synapse_brams[col].extend(w_packed.tolist())
                         syn_addr_ptrs[col] = syn_high + 1
 
+                        # -----------------------------------------------------
                         # 2. Bridge Microcode Stream
+                        # -----------------------------------------------------
                         # 0x1: SSSDSYNQ
                         neural_brams[col].append(cmd_sssd)
                         # 0x2: SYNLOW
