@@ -1,3 +1,5 @@
+# ossna/nmc_compiler.py
+
 import re
 import struct
 
@@ -288,8 +290,9 @@ class LogicNode:
 
 # --- Derleyici Sınıfı ---
 class NMCCompiler:
-    def __init__(self, neuron: Neuron):
+    def __init__(self, neuron: Neuron, base_offset: int = None):
         self.neuron = neuron
+        self.base_offset = base_offset  # <-- YENİ EKLENEN OFFSET PARAMETRESİ
         self.memory_map = {}
         self.register_map = {}
         self.assembly_code = []
@@ -375,10 +378,6 @@ class NMCCompiler:
             self.const_values[name] = val
 
     def preprocess_differential_equations(self):
-        """
-        Diferansiyel denklemleri (tau * dV/dt = RHS veya dV/dt = RHS) tarar;
-        İleri Euler yöntemiyle sembolik olarak V_next = V + (dt/tau) * (RHS) formuna dönüştürür.
-        """
         processed_body = []
         for eq in self.neuron.Body:
             if "=" not in eq:
@@ -387,7 +386,6 @@ class NMCCompiler:
             lhs, rhs = eq.split("=", 1)
             lhs_clean = lhs.replace(" ", "")
 
-            # d<Var>/dt veya coeff * d<Var>/dt desenini yakala
             match_ode = re.match(r'^(?:(.*)\*)?\s*d([a-zA-Z_][a-zA-Z0-9_]*)/dt$', lhs_clean)
             if match_ode:
                 coeff = match_ode.group(1)
@@ -401,7 +399,6 @@ class NMCCompiler:
 
                 dt_val = float(self.neuron.dt)
                 
-                # İleri Euler Dönüşümü: X_next = X + (dt / coeff) * (RHS)
                 if coeff:
                     discrete_eq = f"{var}_next = {var} + ({dt_val} / {coeff}) * ({rhs.strip()})"
                 else:
@@ -418,7 +415,6 @@ class NMCCompiler:
         self.optimized_body_equations = []
         self.folded_constant_counter = 0
 
-        # Diferansiyel denklemleri otomatik olarak cebirsel fark denklemlerine dönüştür
         effective_body = self.preprocess_differential_equations()
 
         for eq in effective_body:
@@ -449,7 +445,6 @@ class NMCCompiler:
                     elif f.endswith("_recip"):
                         base_const = f[:-6]
                         if base_const in self.const_names or re.match(r'^-?\d+(?:\.\d+)?$', base_const):
-                            # Erken Sıfıra Bölme Koruması
                             base_val = self.const_values[base_const] if base_const in self.const_names else float(base_const)
                             if base_val == 0.0:
                                 raise ZeroDivisionError(
@@ -468,7 +463,6 @@ class NMCCompiler:
                     else:
                         dynamic_elements.append(f)
 
-                # Constant Folding
                 if len(constant_elements) > 1:
                     folded_val = 1.0
                     for elem in constant_elements:
@@ -684,13 +678,24 @@ class NMCCompiler:
                 for elem in term["elements"]:
                     referenced_symbols.add(elem)
 
-        # 1. INPUTS Adresleme: Her zaman M(0)'dan başlar
+        # 1. INPUTS Adresleme: Her zaman M(0)'dan başlar (Current Handler ile uyumlu)
         idx = 0
         for inp in self.neuron.Inputs:
             self.memory_map[inp] = idx
             idx += 1
 
-        # 2. 1.0 Sabiti: Girişlerden hemen sonraki adrese kaydırılır
+        # ---------------------------------------------------------------------
+        # 2. BASE OFFSET UYGULAMASI (Girişler ile Sabitleri/Parametreleri Ayırma)
+        # ---------------------------------------------------------------------
+        if self.base_offset is not None:
+            if self.base_offset < idx:
+                raise ValueError(
+                    f"Compiler Error: base_offset ({self.base_offset}) cannot be smaller than "
+                    f"number of inputs ({idx})! Inputs occupy M(0) to M({idx-1})."
+                )
+            idx = self.base_offset
+
+        # 3. 1.0 Sabiti:
         self.memory_map["1.0"] = idx
         self.register_map["1.0"] = "x1"
         idx += 1
@@ -702,17 +707,17 @@ class NMCCompiler:
                     self.memory_map[param] = idx
                     idx += 1
 
-        # Sadece kullanılan sabitleri ekle (Optimizasyon sonucu elenenler yazılmaz)
+        # Sadece kullanılan sabitleri ekle
         for const in self.const_names:
             if const in referenced_symbols:
                 if const not in self.memory_map:
                     self.memory_map[const] = idx
                     idx += 1
-                recip_name = f"{const}_recip"
-                if recip_name in referenced_symbols:
-                    if recip_name not in self.memory_map:
-                        self.memory_map[recip_name] = idx
-                        idx += 1
+            recip_name = f"{const}_recip"
+            if recip_name in referenced_symbols:
+                if recip_name not in self.memory_map:
+                    self.memory_map[recip_name] = idx
+                    idx += 1
 
         # Gövdedeki hedef değişkenleri ekleme
         for eq in self.optimized_body_equations:
@@ -731,7 +736,7 @@ class NMCCompiler:
             self.memory_map["TEMP_ACC"] = idx
             idx += 1
 
-        # Sayısal sabitleri bellek haritasına kaydet (Sıralı literaller ile %100 deterministik build)
+        # Sayısal sabitleri bellek haritasına kaydet
         for symbol in sorted(referenced_symbols):
             if re.match(r'^-?\d+(?:\.\d+)?$', symbol):
                 if symbol not in self.memory_map:
@@ -742,7 +747,6 @@ class NMCCompiler:
         for i, eq in enumerate(self.optimized_body_equations):
             target_var = eq["target"]
             
-            # Her yeni denkleme başlarken akümülatörü sıfırla
             if i > 0:
                 self.assembly_code.append("clracc")
                 
@@ -778,7 +782,7 @@ class NMCCompiler:
                         self.assembly_code.append("gacc,x2")
                         self.assembly_code.append("clracc")
                         self.assembly_code.append(f"lw,x3,{self.memory_map[elem]}")
-                        self.assembly_code.append(f"fmac,x2,x3")
+                        self.assembly_code.append("fmac,x2,x3")
 
                     self.assembly_code.append("gacc,x3")
                     self.assembly_code.append(f"lw,x2,{self.memory_map['TEMP_ACC']}")

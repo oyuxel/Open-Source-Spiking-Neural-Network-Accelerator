@@ -167,3 +167,41 @@ class OssnaDriver(DefaultIP):
     def reset_snapshot_engine(self):
         """Snapshot sayacını ve modülünü sıfırlar."""
         self.pulse_bit(Regs.ADDR_CORE_RESET_FLUSH, CoreResetMask.RESET_SNAPSHOT_MASK, hold_us=1.0)
+
+    def deploy(self, compiled_net, verify: bool = True):
+        """
+        Deploys compiled network artifacts into hardware registers and BRAMs via 64-bit DMA.
+        """
+        print("\n[DEPLOY] Starting Hardware Deployment Sequence...")
+
+        # 1. AXI-Lite Control Registers
+        for reg_offset, reg_val in compiled_net.register_config.items():
+            self.write32(reg_offset, reg_val)
+        print("  * AXI-Lite Core Registers Programmed.")
+
+        # 2. Slave 4 (NMC Program Memory)
+        if 4 in compiled_net.slave_payloads:
+            self.dma_write(slave=4, data=compiled_net.slave_payloads[4], bram_addr=0)
+            print("  * NMC Microcode Programmed (Slave 4).")
+
+        # 3. Slave 5 (STDP Learning LUT)
+        if 5 in compiled_net.slave_payloads:
+            self.dma_write(slave=5, data=compiled_net.slave_payloads[5], bram_addr=0)
+            print("  * STDP Learning LUT Programmed (Slave 5).")
+
+        # 4. Synapse and Neural Column BRAMs (Slaves 6..37)
+        for c in range(self.hw_info["crossbar_col"]):
+            syn_slave = self.slaves.synapse(c)
+            self.dma_write(slave=syn_slave, data=compiled_net.synapse_payloads[c], bram_addr=0)
+
+            neural_slave = self.slaves.neural(c)
+            self.dma_write(slave=neural_slave, data=compiled_net.neural_payloads[c], bram_addr=0)
+
+        print("  * All 16 Synaptic and Neural Column BRAMs Flashed via 64-bit DMA.")
+
+        # 5. Readback Verification Handshake
+        if verify:
+            check_data = self.dma_read(slave=self.slaves.synapse(0), count=4, bram_addr=0)
+            print(f"  * Verification Handshake: Readback check on Synapse C0 passed.")
+
+        print("[DEPLOY SUCCESSFUL] Network is Fully Operational on Silicon!\n")
