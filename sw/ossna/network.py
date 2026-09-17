@@ -4,14 +4,8 @@ import math
 import numpy as np
 from typing import Union, List, Dict, Optional
 
-# =============================================================================
-# 1. INPUT ENCODER (D2S ENCODER & INTERMEDIATE REPRESENTATION)
-# =============================================================================
 class InputEncoder:
-    """
-    Encodes raw normalized inputs into the UINT32 Intermediate Representation (IR)
-    required by the hardware Data-to-Spike (D2S) engine.
-    """
+
     def __init__(self, mode: str = "poisson", time_window: int = 100, seed: int = 0x12345678, data_count: int = None):
         self.mode = mode.lower()
         if self.mode not in ["poisson", "latency"]:
@@ -21,9 +15,7 @@ class InputEncoder:
         self.data_count = data_count
 
     def encode(self, raw_features: np.ndarray) -> np.ndarray:
-        """
-        Converts normalized features in [0.0, 1.0] into a UINT32 IR stream for D2S.
-        """
+
         features = np.clip(np.array(raw_features, dtype=np.float64), 0.0, 1.0)
         
         if self.mode == "poisson":
@@ -35,156 +27,176 @@ class InputEncoder:
             ir_values = np.clip(step_timings, 0, self.time_window - 1)
             return ir_values.astype(np.uint32)
 
+class Projection:
 
-# =============================================================================
-# 2. LAYER REPRESENTATION (ULEARN Parametreleri Entegre Edildi)
-# =============================================================================
-class Layer:
-    """Represents a neuron population and its incoming synaptic projection."""
-    def __init__(self, name: str, size: int, input_size: int,
-                 neuron_model, synapse_model,
-                 weights: np.ndarray, w_min: int = 0, w_max: int = 127,
-                 lateral_inhibition: bool = False, lateral_weight: int = -120,
-                 learning: bool = True, learning_rate: float = 0.05,
+    def __init__(self, name: str, source, target, target_pin: str,
+                 weights: np.ndarray, scheme: str = "dense",
+                 synapse_model=None, learning: bool = False,
+                 learning_rate: float = 0.05,
                  pruning: bool = False, pruning_threshold: Optional[float] = None,
                  ignore_zero_synapses: bool = True,
-                 connectivity: Union[str, float] = "dense"):
+                 w_min: float = 0.0, w_max: float = 127.0):
         self.name = name
-        self.size = size
-        self.input_size = input_size
-        self.neuron_model = neuron_model
+        self.source = source          
+        self.target = target          
+        self.target_pin = target_pin  
+        self.weights = weights        
+        self.scheme = scheme
         self.synapse_model = synapse_model
-        self.weights = weights
-        self.w_min = w_min
-        self.w_max = w_max
-        self.lateral_inhibition = lateral_inhibition
-        self.lateral_weight = lateral_weight
-        self.learning = learning
+        self.learning = learning and (synapse_model is not None)
         self.learning_rate = float(learning_rate)
-        # Eşik verilmişse budama otomatik açılır
         self.pruning = pruning or (pruning_threshold is not None)
         self.pruning_threshold = pruning_threshold
         self.ignore_zero_synapses = ignore_zero_synapses
-        self.connectivity = connectivity
+        self.w_min = float(w_min)
+        self.w_max = float(w_max)
 
+        weight_range = self.w_max - self.w_min
+        self.q_factor = (weight_range / 255.0) if weight_range > 0 else (1.0 / 255.0)
 
-# =============================================================================
-# 3. NETWORK CLASS
-# =============================================================================
+class Layer:
+    def __init__(self, name: str, size: int, neuron_model):
+        self.name = name
+        self.size = size
+        self.neuron_model = neuron_model
+        self.projections: List[Projection] = []
+
+    def get_projection_for_pin(self, pin_name: str) -> Optional[Projection]:
+        for proj in self.projections:
+            if proj.target_pin == pin_name:
+                return proj
+        return None
+
 class Network:
-    """
-    SNN Network Topology Definition for the OSSNA Hardware Architecture.
-    Does not compile; holds the pure network topology and parameters.
-    """
+ 
     def __init__(self, input_size: int):
         self.input_size = int(input_size)
         self.layers: List[Layer] = []
+        self.projections: List[Projection] = []
         self.encoder: Optional[InputEncoder] = None
 
-    # -------------------------------------------------------------------------
-    # Feature 5: Input Encoding Setup (D2S Engine Integration)
-    # -------------------------------------------------------------------------
     def set_input_encoder(self, mode: str = "poisson", time_window: int = 100, seed: int = 0x12345678):
         self.encoder = InputEncoder(mode=mode, time_window=time_window, seed=seed, data_count=self.input_size)
 
-    # -------------------------------------------------------------------------
-    # Features 2 & 3: Weight Initializers & Sparsity
-    # -------------------------------------------------------------------------
-    def _create_weights(self, in_size: int, out_size: int, init_method, w_min: int, w_max: int, connectivity) -> np.ndarray:
+    def add_layer(self, name: str, size: int, neuron_model) -> Layer:
+        layer = Layer(name=name, size=size, neuron_model=neuron_model)
+        self.layers.append(layer)
+        return layer
+
+    def _create_weights(self, in_size: int, out_size: int, init_method, w_min: float, w_max: float, q_factor: float, connectivity) -> np.ndarray:
+
         if isinstance(init_method, np.ndarray):
             if init_method.shape != (in_size, out_size):
                 raise ValueError(f"Weight matrix shape mismatch! Expected: ({in_size}, {out_size}), Got: {init_method.shape}")
-            W = np.copy(init_method).astype(np.float64)
+            W_float = np.copy(init_method).astype(np.float64)
+        elif init_method in ["all_to_all_except_self", "wta"]:
+            val = float(w_min)
+            W_float = np.full((in_size, out_size), fill_value=val, dtype=np.float64)
         elif init_method in ["uniform", "random"]:
-            W = np.random.uniform(w_min, w_max, size=(in_size, out_size))
+            W_float = np.random.uniform(w_min, w_max, size=(in_size, out_size))
         elif init_method == "normal":
             mid = (w_max + w_min) / 2.0
-            std = max(1.0, (w_max - w_min) / 6.0)
-            W = np.random.normal(mid, std, size=(in_size, out_size))
+            std = max(1e-4, (w_max - w_min) / 6.0)
+            W_float = np.random.normal(mid, std, size=(in_size, out_size))
         elif init_method == "xavier":
             scale = np.sqrt(2.0 / (in_size + out_size)) * (w_max - w_min)
-            W = np.random.uniform(w_min, min(w_max, w_min + scale), size=(in_size, out_size))
+            W_float = np.random.uniform(w_min, min(w_max, w_min + scale), size=(in_size, out_size))
         elif isinstance(init_method, (int, float)):
-            W = np.full((in_size, out_size), float(init_method), dtype=np.float64)
+            W_float = np.full((in_size, out_size), float(init_method), dtype=np.float64)
         else:
-            raise ValueError(f"Unknown weight initialization method '{init_method}'")
+            raise ValueError(f"Unknown weight configuration: {init_method}")
 
-        W = np.clip(np.round(W), w_min, w_max)
+        W_float = np.clip(W_float, w_min, w_max)
 
-        # Sparse Connectivity -> Unconnected synapses are strictly 0!
+        W_int8 = np.clip(np.round(W_float / q_factor), -128, 127).astype(np.int8)
+
+        if init_method in ["all_to_all_except_self", "wta"] and in_size == out_size:
+            np.fill_diagonal(W_int8, 0)
+
         if isinstance(connectivity, (int, float)) and 0.0 < connectivity < 1.0:
             mask = np.random.rand(in_size, out_size) < connectivity
-            W = W * mask
+            W_int8 = W_int8 * mask
 
-        return W.astype(np.int32)
+        return W_int8
 
-    # -------------------------------------------------------------------------
-    # Layer Construction (ULEARN Parametreleri Eklendi)
-    # -------------------------------------------------------------------------
-    def add_layer(self, name: str, size: int, neuron_model, synapse_model=None,
-                  weights: Union[str, float, np.ndarray] = "uniform",
-                  w_min: int = 0, w_max: int = 127,
-                  lateral_inhibition: bool = False, lateral_weight: int = -120,
-                  learning: bool = True, learning_rate: float = 0.05,
-                  pruning: bool = False, pruning_threshold: Optional[float] = None,
-                  ignore_zero_synapses: bool = True,
-                  connectivity: Union[str, float] = "dense") -> Layer:
+    def add_projection(self, name: str, source: Union[str, Layer], target: Layer, target_pin: str,
+                       weights: Union[str, float, int, np.ndarray] = "uniform",
+                       scheme: str = "dense",
+                       synapse_model=None,
+                       learning: bool = False, learning_rate: float = 0.05,
+                       pruning: bool = False, pruning_threshold: Optional[float] = None,
+                       ignore_zero_synapses: bool = True,
+                       w_min: float = 0.0, w_max: float = 127.0) -> Projection:
         
-        current_input_size = self.input_size if len(self.layers) == 0 else self.layers[-1].size
+        if target_pin not in target.neuron_model.Inputs:
+            raise ValueError(
+                f"[TOPOLOGY ERROR] Pin '{target_pin}' does not exist in target neuron model! "
+                f"Available inputs in model: {target.neuron_model.Inputs}"
+            )
 
-        weight_matrix = self._create_weights(current_input_size, size, weights, w_min, w_max, connectivity)
+        if isinstance(source, str) and source.lower() == "input":
+            source_size = self.input_size
+        elif isinstance(source, Layer):
+            source_size = source.size
+        else:
+            raise ValueError(f"Invalid source '{source}'! Must be 'input' or a Layer instance.")
 
-        layer = Layer(
+        target_size = target.size
+
+        weight_range = float(w_max) - float(w_min)
+        q_factor = (weight_range / 255.0) if weight_range > 0 else (1.0 / 255.0)
+
+        init_method = scheme if scheme in ["all_to_all_except_self", "wta"] else weights
+        if scheme in ["all_to_all_except_self", "wta"] and isinstance(weights, (int, float)):
+            w_min = float(weights) 
+
+        weight_matrix_int8 = self._create_weights(source_size, target_size, init_method, w_min, w_max, q_factor, connectivity="dense")
+
+        proj = Projection(
             name=name,
-            size=size,
-            input_size=current_input_size,
-            neuron_model=neuron_model,
+            source=source,
+            target=target,
+            target_pin=target_pin,
+            weights=weight_matrix_int8,
+            scheme=scheme,
             synapse_model=synapse_model,
-            weights=weight_matrix,
-            w_min=w_min,
-            w_max=w_max,
-            lateral_inhibition=lateral_inhibition,
-            lateral_weight=lateral_weight,
             learning=learning,
             learning_rate=learning_rate,
             pruning=pruning,
             pruning_threshold=pruning_threshold,
             ignore_zero_synapses=ignore_zero_synapses,
-            connectivity=connectivity
+            w_min=w_min,
+            w_max=w_max
         )
-        self.layers.append(layer)
-        return layer
 
-    # -------------------------------------------------------------------------
-    # Feature 1: Hardware Pre-Validation
-    # -------------------------------------------------------------------------
+        target.projections.append(proj)
+        self.projections.append(proj)
+        return proj
+
     def validate_hardware(self, core_or_hw_info) -> bool:
         hw_info = core_or_hw_info.hw_info if hasattr(core_or_hw_info, "hw_info") else core_or_hw_info
-
         max_neurons = hw_info["max_supported_neurons"]
         crossbar_cols = hw_info["crossbar_col"]
         words_per_syn_col = hw_info["total_synapse_mem_words"] // crossbar_cols
 
         total_neurons = sum(l.size for l in self.layers)
         if total_neurons > max_neurons:
-            raise ValueError(f"[HARDWARE ERROR] Total network neurons ({total_neurons}) exceeds hardware limit ({max_neurons})!")
+            raise ValueError(f"[HARDWARE ERROR] Total network neurons ({total_neurons}) exceeds limit ({max_neurons})!")
 
         for l in self.layers:
             k_virtual = math.ceil(l.size / crossbar_cols)
-            synapses_needed = k_virtual * l.input_size
+            total_inputs_for_layer = sum(p.weights.shape[0] for p in l.projections)
+            synapses_needed = k_virtual * total_inputs_for_layer
 
             if synapses_needed > words_per_syn_col:
                 raise OverflowError(
                     f"[HARDWARE ERROR] Layer '{l.name}' requires {synapses_needed} synapses per column, "
-                    f"but hardware column depth is {words_per_syn_col} words!"
+                    f"but hardware depth is {words_per_syn_col} words!"
                 )
 
-        print("[VALIDATION OK] Network topology is 100% compatible with hardware constraints!")
+        print("[VALIDATION OK] Network topology and projections are 100% compatible with hardware constraints!")
         return True
 
-    # -------------------------------------------------------------------------
-    # Feature 4: Checkpointing
-    # -------------------------------------------------------------------------
     def save_checkpoint(self, filepath: str, core=None):
         checkpoint = {}
         if core is not None:
@@ -193,10 +205,13 @@ class Network:
             for c in range(col_count):
                 s_id = core.slaves.synapse(c)
                 depth = core.slaves.get(s_id).depth_words
-                checkpoint[f"syn_col_{c}"] = core.dma_read(slave=s_id, count=depth, bram_addr=0)
+                packed_data = core.dma_read(slave=s_id, count=depth, bram_addr=0)
+                # Unpack: [15:8] Weight only (INT8)
+                weights_only = (packed_data >> 8).astype(np.int8)
+                checkpoint[f"syn_col_{c}"] = weights_only
         else:
-            for idx, l in enumerate(self.layers):
-                checkpoint[f"layer_{idx}_{l.name}_weights"] = l.weights
+            for idx, p in enumerate(self.projections):
+                checkpoint[f"proj_{idx}_{p.name}_weights"] = p.weights
 
         np.savez_compressed(filepath, **checkpoint)
         print(f"[CHECKPOINT] Network state saved successfully to '{filepath}'.")
@@ -210,37 +225,35 @@ class Network:
                 key = f"syn_col_{c}"
                 if key in data:
                     s_id = core.slaves.synapse(c)
-                    weights_chunk = data[key]
-                    core.dma_write(slave=s_id, data=weights_chunk, bram_addr=0)
+                    w_raw = data[key]
+                    packed = ((w_raw.astype(np.uint16) & 0xFF) << 8) | 0x7F
+                    core.dma_write(slave=s_id, data=packed, bram_addr=0)
         else:
-            for idx, l in enumerate(self.layers):
-                key = f"layer_{idx}_{l.name}_weights"
+            for idx, p in enumerate(self.projections):
+                key = f"proj_{idx}_{p.name}_weights"
                 if key in data:
-                    l.weights = data[key]
+                    p.weights = data[key]
         print(f"[CHECKPOINT] Network state loaded successfully from '{filepath}'.")
 
-    # -------------------------------------------------------------------------
-    # Feature 6: Architectural Summary Report
-    # -------------------------------------------------------------------------
     def summary(self):
-        print("\n" + "="*105)
-        print(f"{'Layer Name':<18} | {'Input':<8} | {'Neurons':<8} | {'Synapses':<12} | {'Learning':<14} | {'Lateral Inh':<14} | {'Density':<10}")
-        print("="*105)
+        print("\n" + "="*125)
+        print(f"{'Layer (Target)':<16} | {'Target Pin':<12} | {'Source':<16} | {'Synapses':<10} | {'Learning':<12} | {'Q_syn':<8} | {'Scheme [Wmin..Wmax]':<22}")
+        print("="*125)
         total_synapses = 0
         total_neurons = sum(l.size for l in self.layers)
 
         for l in self.layers:
-            syn_count = l.input_size * l.size
-            total_synapses += syn_count
-            learning_str = f"ON (η={l.learning_rate})" if l.learning and l.synapse_model is not None else "OFF"
-            lat_str = f"YES ({l.lateral_weight})" if l.lateral_inhibition else "NO"
-            conn_str = f"Sparse({l.connectivity})" if isinstance(l.connectivity, float) else "Dense"
+            for p in l.projections:
+                syn_count = p.weights.shape[0] * p.weights.shape[1]
+                total_synapses += syn_count
+                src_name = "Input (D2S/Main)" if isinstance(p.source, str) else p.source.name
+                learn_str = f"ON (η={p.learning_rate})" if p.learning else "OFF (Frozen)"
+                scheme_str = f"{p.scheme} [{p.w_min:.1f}..{p.w_max:.1f}]"
+                print(f"{l.name:<16} | {p.target_pin:<12} | {src_name:<16} | {syn_count:<10} | {learn_str:<12} | {p.q_factor:<8.4f} | {scheme_str:<22}")
 
-            print(f"{l.name:<18} | {l.input_size:<8} | {l.size:<8} | {syn_count:<12} | {learning_str:<14} | {lat_str:<14} | {conn_str:<10}")
-
-        print("="*105)
+        print("="*125)
         print(f"Total Neurons        : {total_neurons}")
         print(f"Total Synapses       : {total_synapses}")
         if self.encoder:
             print(f"D2S Encoder Mode     : {self.encoder.mode.upper()} (Time Window: {self.encoder.time_window} Timesteps)")
-        print("="*105 + "\n")
+        print("="*125 + "\n")
