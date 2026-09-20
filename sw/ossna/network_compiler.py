@@ -33,7 +33,13 @@ class CompiledNetwork:
         self.register_config: Dict[int, int] = {}
         self.slave_payloads: Dict[int, np.ndarray] = {}
         
+        self.xnever_base: int = 0
+        self.xnever_high: int = 0
+        self.shared_inputs_start: int = 0
+        self.shared_inputs_end: int = 0
+
         self.verbose_nmc_asm: List[str] = []
+        self.verbose_nmc_memory_map: List[str] = []
         self.verbose_lut: List[str] = []
         self.verbose_synapses: Dict[int, List[str]] = {c: [] for c in range(hw_info["crossbar_col"])}
         self.verbose_neural: Dict[int, List[str]] = {c: [] for c in range(hw_info["crossbar_col"])}
@@ -47,6 +53,7 @@ class CompiledNetwork:
         bundle = {
             "reg_addrs": np.array(list(self.register_config.keys()), dtype=np.uint32),
             "reg_vals":  np.array(list(self.register_config.values()), dtype=np.uint32),
+            "xnever_bounds": np.array([self.xnever_base, self.xnever_high], dtype=np.uint32),
             **{f"slave_{k}": v for k, v in self.slave_payloads.items()}
         }
         np.savez_compressed(filepath, **bundle)
@@ -68,8 +75,20 @@ class CompiledNetwork:
                     f.write(f"{val:04X}\n")
             
             with open(os.path.join(verb_dir, "nmc_program_verbose.txt"), "w") as f:
-                f.write("=== NMC ASSEMBLY INSTRUCTIONS ===\n")
+                f.write("================================================================================\n")
+                f.write("                    NMC MEMORY CONFIGURATION & XNEVER BOUNDARIES\n")
+                f.write("================================================================================\n")
+                f.write(f"XNEVER_BASE               : {self.xnever_base}\n")
+                f.write(f"XNEVER_HIGH               : {self.xnever_high}\n")
+                f.write(f"Executable Program Range  : M(0) to M({max(0, self.xnever_base - 1)})\n")
+                f.write(f"Shared Input Scratchpad   : M({self.shared_inputs_start}) to M({self.shared_inputs_end - 1})\n")
+                f.write(f"Footprints / Data Range   : M({self.shared_inputs_end}) to M({self.xnever_high - 1})\n")
+                f.write(f"Total BRAM Memory Used    : {self.xnever_high} / 1024 words\n")
+                f.write("================================================================================\n\n")
+                f.write("=== NMC DISASSEMBLED INSTRUCTION TRACE ===\n")
                 f.write("\n".join(self.verbose_nmc_asm))
+                f.write("\n\n=== FULL NMC BRAM MEMORY MAP (0..1023) ===\n")
+                f.write("\n".join(self.verbose_nmc_memory_map))
 
         if 5 in self.slave_payloads:
             with open(os.path.join(hex_dir, "slave_5_learning_lut.mem"), "w") as f:
@@ -130,39 +149,133 @@ class NetworkCompiler:
         self.network.validate_hardware(self.hw_info)
         artifact = CompiledNetwork(self.hw_info)
 
-        print("\n[STAGE 1] Compiling Unique Neuron Models for Slave 4 (NMC Program)...")
-        model_pflow_start = {}
-        model_footprints = {}
-        slave4_instructions = []
-        current_scratchpad_offset = 16 
-
+        print("\n[STAGE 1] Calculating Dynamic XNEVER & Compiling NMC Memory Image...")
+        unique_models = []
+        max_inputs = 0
+        total_prog_words = 0
+        
         for layer in self.network.layers:
             m = layer.neuron_model
             m_id = id(m)
-            if m_id not in model_pflow_start:
-                nmc_comp = NMCCompiler(m, base_offset=current_scratchpad_offset)
-                asm_code = nmc_comp.compile()
-                bytecode = NModelAssembler(asm_code)
+            if m_id not in [x["id"] for x in unique_models]:
+                dry_comp = NMCCompiler(m)
+                dry_asm = dry_comp.compile()
+                dry_bc = NModelAssembler(dry_asm)
+                prog_len = len(dry_bc)
                 
-                pflow_start = len(slave4_instructions)
-                model_pflow_start[m_id] = pflow_start
-                slave4_instructions.extend(bytecode)
+                inputs_len = len(m.Inputs)
+                if inputs_len > max_inputs:
+                    max_inputs = inputs_len
+                    
+                unique_models.append({
+                    "id": m_id,
+                    "model": m,
+                    "prog_len": prog_len
+                })
+                total_prog_words += prog_len
+
+        xnever_base = total_prog_words
+        shared_inputs_start = xnever_base
+        shared_inputs_end   = xnever_base + max_inputs
+        current_footprint_offset = shared_inputs_end
+        
+        artifact.xnever_base = xnever_base
+        artifact.shared_inputs_start = shared_inputs_start
+        artifact.shared_inputs_end = shared_inputs_end
+
+        print(f"  * Total Program Words      : {total_prog_words} words (M(0) to M({max(0, total_prog_words - 1)}))")
+        print(f"  * Max Input Pins           : {max_inputs} pins")
+        print(f"  * XNEVER_BASE              : {xnever_base}")
+        print(f"  * Shared Inputs Zone       : M({shared_inputs_start}) to M({shared_inputs_end - 1})")
+
+        nmc_bram_image = np.zeros(1024, dtype=np.uint16)
+        artifact.verbose_nmc_memory_map = [f"ADDR {i:<4} | HEX: 0000 | (Empty)" for i in range(1024)]
+        
+        for i in range(max_inputs):
+            in_addr = shared_inputs_start + i
+            artifact.verbose_nmc_memory_map[in_addr] = f"ADDR {in_addr:<4} | HEX: 0000 | [SHARED INPUT {i}] (Current Handler)"
+
+        model_pflow_start = {}
+        model_footprints = {}
+        current_prog_ptr = 0
+
+        for um in unique_models:
+            m_id = um["id"]
+            m = um["model"]
+            
+            nmc_comp = NMCCompiler(m, base_offset=current_footprint_offset, input_base=shared_inputs_start)
+            asm_code = nmc_comp.compile()
+            bytecode = NModelAssembler(asm_code)
+            
+            pflow_start = current_prog_ptr
+            model_pflow_start[m_id] = pflow_start
+            
+            if (current_prog_ptr + len(bytecode)) > 1024:
+                raise OverflowError("NMC Memory Overflows 1024 words!")
                 
-                artifact.verbose_nmc_asm.append(f"\n# --- Neuron Model ({layer.name}, Base Offset: M({current_scratchpad_offset})) ---")
-                asm_lines = asm_code.split("\n")
-                for i, (asm, bc) in enumerate(zip(asm_lines, bytecode)):
-                    artifact.verbose_nmc_asm.append(f"ADDR {pflow_start + i:<4} | HEX: {bc:04X} | ASM: {asm}")
+            nmc_bram_image[current_prog_ptr : current_prog_ptr + len(bytecode)] = bytecode
+            
+            artifact.verbose_nmc_asm.append(f"\n# --- Neuron Model (PFLOW Start: {pflow_start}, Base Offset: M({current_footprint_offset})) ---")
+            asm_lines = asm_code.split("\n")
+            for i, (asm, bc) in enumerate(zip(asm_lines, bytecode)):
+                artifact.verbose_nmc_asm.append(f"ADDR {pflow_start + i:<4} | HEX: {bc:04X} | ASM: {asm}")
+                artifact.verbose_nmc_memory_map[pflow_start + i] = f"ADDR {pflow_start + i:<4} | HEX: {bc:04X} | [PROGRAM] {asm}"
 
-                model_footprints[m_id] = {
-                    "memory_map": nmc_comp.memory_map,
-                    "param_names": nmc_comp.param_names,
-                    "param_values": nmc_comp.param_values,
-                    "base_offset": current_scratchpad_offset
-                }
-                current_scratchpad_offset += 16
+            current_prog_ptr += len(bytecode)
 
-        artifact.slave_payloads[4] = np.array(slave4_instructions, dtype=np.uint16)
+            model_footprints[m_id] = {
+                "memory_map": nmc_comp.memory_map,
+                "param_names": nmc_comp.param_names,
+                "param_values": nmc_comp.param_values,
+                "const_names": nmc_comp.const_names,
+                "const_values": nmc_comp.const_values,
+                "base_offset": current_footprint_offset
+            }
+            
+            if "1.0" in nmc_comp.memory_map:
+                a_1 = nmc_comp.memory_map["1.0"]
+                fp16 = HalfPrecision2Bin(1.0)
+                nmc_bram_image[a_1] = fp16
+                artifact.verbose_nmc_memory_map[a_1] = f"ADDR {a_1:<4} | HEX: {fp16:04X} | [CONSTANT] 1.0"
+
+            for c_name in nmc_comp.const_names:
+                if c_name in nmc_comp.memory_map:
+                    c_addr = nmc_comp.memory_map[c_name]
+                    c_val = nmc_comp.const_values.get(c_name, 0.0)
+                    fp16 = HalfPrecision2Bin(c_val)
+                    nmc_bram_image[c_addr] = fp16
+                    artifact.verbose_nmc_memory_map[c_addr] = f"ADDR {c_addr:<4} | HEX: {fp16:04X} | [CONSTANT] {c_name} = {c_val}"
+            
+            for c_name in nmc_comp.const_names:
+                r_name = f"{c_name}_recip"
+                if r_name in nmc_comp.memory_map:
+                    r_addr = nmc_comp.memory_map[r_name]
+                    c_val = nmc_comp.const_values.get(c_name, 0.0)
+                    recip_val = 1.0 / c_val if c_val != 0 else 0.0
+                    fp16 = HalfPrecision2Bin(recip_val)
+                    nmc_bram_image[r_addr] = fp16
+                    artifact.verbose_nmc_memory_map[r_addr] = f"ADDR {r_addr:<4} | HEX: {fp16:04X} | [CONSTANT] {r_name} = {recip_val:.6f}"
+
+            for p_name in nmc_comp.param_names:
+                if p_name in nmc_comp.memory_map:
+                    p_addr = nmc_comp.memory_map[p_name]
+                    artifact.verbose_nmc_memory_map[p_addr] = f"ADDR {p_addr:<4} | HEX: 0000 | [DYNAMIC PARAM] {p_name} (Loaded by Bridge)"
+
+            if "v_next" in nmc_comp.memory_map:
+                v_addr = nmc_comp.memory_map["v_next"]
+                artifact.verbose_nmc_memory_map[v_addr] = f"ADDR {v_addr:<4} | HEX: 0000 | [TARGET VAR] v_next"
+
+            current_footprint_offset = max(nmc_comp.memory_map.values()) + 1
+
+        artifact.slave_payloads[4] = nmc_bram_image
         artifact.nmc_microcode = artifact.slave_payloads[4]
+
+        xnever_high = current_footprint_offset
+        artifact.xnever_high = xnever_high
+        artifact.register_config[Regs.ADDR_NMC_XNEVER] = (xnever_high << 16) | (xnever_base & 0x3FF)
+
+        print(f"  * XNEVER_HIGH              : {xnever_high}")
+        print(f"  * NMC BRAM Memory Usage    : {xnever_high}/1024 words used.")
 
         print("\n[STAGE 2] Compiling STDP Plasticity Tables for Slave 5 (Learning LUT)...")
         synapse_table_starts = {}
@@ -174,7 +287,7 @@ class NetworkCompiler:
                 table_key = (id(s_model), round(proj.q_factor, 6))
                 if table_key not in synapse_table_starts:
                     syn_comp = SynapseCompiler(s_model)
-                    lut_array = syn_comp.compile(q_factor=proj.q_factor)
+                    lut_array = syn_comp.compile(q_factor=proj.q_factor, enforce_zero_point=True)
                     
                     tbl_start = len(slave5_data)
                     synapse_table_starts[table_key] = tbl_start
@@ -340,7 +453,6 @@ class NetworkCompiler:
             artifact.synapse_payloads[c] = artifact.slave_payloads[6 + c]
             artifact.neural_payloads[c]  = artifact.slave_payloads[neural_base + c]
 
-        artifact.register_config[Regs.ADDR_NMC_XNEVER] = (current_scratchpad_offset << 16) | 0x0000
         artifact.register_config[Regs.ADDR_CORE_ROUTING_CFG] = CoreCfgMask.SYNAPSE_ROUTE_MASK
 
         if self.network.encoder is not None:
