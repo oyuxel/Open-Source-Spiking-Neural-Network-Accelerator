@@ -305,6 +305,9 @@ class NMCCompiler:
         self.optimized_body_equations = []
         self.folded_constant_counter = 0
 
+    def _get_rel_addr(self, symbol_name: str) -> int:
+        return self.memory_map[symbol_name] - self.input_base
+
     @classmethod
     def help(cls):
         help_text = """
@@ -571,18 +574,18 @@ class NMCCompiler:
                 v1, v2 = v1.strip(), v2.strip()
 
                 insts.append("clracc")
-                insts.append(f"lw,x2,{self.memory_map[v1]}")
+                insts.append(f"lw,x2,{self._get_rel_addr(v1)}")
                 insts.append("fmac,x2,x1")
 
-                insts.append(f"lw,x2,{self.memory_map[v2]}")
+                insts.append(f"lw,x2,{self._get_rel_addr(v2)}")
                 mnemonic = "fmac" if op == "+" else "smac"
                 insts.append(f"{mnemonic},x2,x1")
 
                 insts.append("gacc,x2")
-                insts.append(f"sw,x2,{self.memory_map[target_var]}")
+                insts.append(f"sw,x2,{self._get_rel_addr(target_var)}")
             else:
-                insts.append(f"lw,x2,{self.memory_map[expr]}")
-                insts.append(f"sw,x2,{self.memory_map[target_var]}")
+                insts.append(f"lw,x2,{self._get_rel_addr(expr)}")
+                insts.append(f"sw,x2,{self._get_rel_addr(target_var)}")
         return insts
 
     def compile_chain(self, chain):
@@ -597,8 +600,8 @@ class NMCCompiler:
                         "Only simple binary comparisons are supported."
                     )
                 lhs, op, rhs = match.groups()
-                block_insts.append(f"lw,x2,{self.memory_map[lhs]}")
-                block_insts.append(f"lw,x3,{self.memory_map[rhs]}")
+                block_insts.append(f"lw,x2,{self._get_rel_addr(lhs)}")
+                block_insts.append(f"lw,x3,{self._get_rel_addr(rhs)}")
                 block_insts.append("comp,x2,x3")
 
                 skip_ops = self.get_skip_branches(op)
@@ -747,22 +750,22 @@ class NMCCompiler:
 
                 if len(elements) == 1:
                     elem = elements[0]
-                    self.assembly_code.append(f"lw,x2,{self.memory_map[elem]}")
+                    self.assembly_code.append(f"lw,x2,{self._get_rel_addr(elem)}")
                     self.assembly_code.append(f"{mnemonic},x2,x1")
 
                 elif len(elements) == 2:
                     e1, e2 = elements[0], elements[1]
-                    self.assembly_code.append(f"lw,x2,{self.memory_map[e1]}")
-                    self.assembly_code.append(f"lw,x3,{self.memory_map[e2]}")
+                    self.assembly_code.append(f"lw,x2,{self._get_rel_addr(e1)}")
+                    self.assembly_code.append(f"lw,x3,{self._get_rel_addr(e2)}")
                     self.assembly_code.append(f"{mnemonic},x2,x3")
 
                 else:
                     self.assembly_code.append("gacc,x2")
-                    self.assembly_code.append(f"sw,x2,{self.memory_map['TEMP_ACC']}")
+                    self.assembly_code.append(f"sw,x2,{self._get_rel_addr('TEMP_ACC')}")
 
                     e1, e2 = elements[0], elements[1]
-                    self.assembly_code.append(f"lw,x2,{self.memory_map[e1]}")
-                    self.assembly_code.append(f"lw,x3,{self.memory_map[e2]}")
+                    self.assembly_code.append(f"lw,x2,{self._get_rel_addr(e1)}")
+                    self.assembly_code.append(f"lw,x3,{self._get_rel_addr(e2)}")
 
                     self.assembly_code.append("clracc")
                     self.assembly_code.append(f"fmac,x2,x3")
@@ -770,17 +773,17 @@ class NMCCompiler:
                     for elem in elements[2:]:
                         self.assembly_code.append("gacc,x2")
                         self.assembly_code.append("clracc")
-                        self.assembly_code.append(f"lw,x3,{self.memory_map[elem]}")
-                        self.assembly_code.append("fmac,x2,x3")
+                        self.assembly_code.append(f"lw,x3,{self._get_rel_addr(elem)}")
+                        self.assembly_code.append(f"fmac,x2,x3")
 
                     self.assembly_code.append("gacc,x3")
-                    self.assembly_code.append(f"lw,x2,{self.memory_map['TEMP_ACC']}")
+                    self.assembly_code.append(f"lw,x2,{self._get_rel_addr('TEMP_ACC')}")
                     self.assembly_code.append("clracc")
-                    self.assembly_code.append("fmac,x2,x1")
+                    self.assembly_code.append(f"fmac,x2,x1")
                     self.assembly_code.append(f"{mnemonic},x3,x1")
 
             self.assembly_code.append("gacc,x2")
-            self.assembly_code.append(f"sw,x2,{self.memory_map[target_var]}")
+            self.assembly_code.append(f"sw,x2,{self._get_rel_addr(target_var)}")
 
     def generate_memory_image(self):
         num_slots = max(self.memory_map.values()) + 1
@@ -839,7 +842,7 @@ class NMCCompiler:
         self.build_memory_and_registers()
 
         self.assembly_code.append("clracc")
-        self.assembly_code.append(f"lw,x1,{self.memory_map['1.0']}")
+        self.assembly_code.append(f"lw,x1,{self._get_rel_addr('1.0')}")
 
         self.parse_and_compile_body()
 
