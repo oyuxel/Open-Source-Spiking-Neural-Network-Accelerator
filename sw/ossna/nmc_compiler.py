@@ -3,38 +3,41 @@
 import re
 import struct
 
-# --- Token Definition ---
 class Token:
     def __init__(self, type, value):
         self.type = type
         self.value = value
 
-# --- AST (Abstract Syntax Tree) Nodes ---
 class ASTNode: pass
+
 class BinOp(ASTNode):
     def __init__(self, left, op, right):
         self.left = left
         self.op = op
         self.right = right
+
 class Exponent(ASTNode):
     def __init__(self, base, power):
         self.base = base
         self.power = power
+
 class Neg(ASTNode):
     def __init__(self, node):
         self.node = node
+
 class Num(ASTNode):
     def __init__(self, value):
         self.value = value
+
 class Var(ASTNode):
     def __init__(self, name):
         self.name = name
+
 class FuncCall(ASTNode):
     def __init__(self, name, arg):
         self.name = name
         self.arg = arg
 
-# --- Helper Multiplication & Polynomial Functions ---
 def is_accumulator(name):
     return name.lower() in ["i_syn", "acc"]
 
@@ -67,7 +70,6 @@ def make_poly_ast(coeffs, arg_node):
             node_sum = BinOp(node_sum, op, term_node)
     return node_sum
 
-# --- Symbolic Expansion Engine ---
 def expand_ast(node):
     if isinstance(node, Num):
         return [{"sign": "+", "factors": [node.value]}]
@@ -140,7 +142,6 @@ def expand_ast(node):
             
     raise NotImplementedError("Unknown AST node type")
 
-# --- Lexer ---
 def tokenize(expr_str):
     token_specification = [
         ('NUMBER',   r'\d+(?:\.\d+)?'),
@@ -164,7 +165,6 @@ def tokenize(expr_str):
         tokens.append(Token(kind, value))
     return tokens
 
-# --- Parser ---
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -251,7 +251,7 @@ class Parser:
             self.consume()
             return self.primary()
         else:
-            raise SyntaxError(f"Geçersiz karakter: {token.value}")
+            raise SyntaxError(f"Invalid character: {token.value}")
 
 def HalfPrecision2Bin(float_num):
     float_num = float(float_num)
@@ -269,7 +269,6 @@ def HalfPrecision2Bin(float_num):
     half_precision = (sign << 15) | (new_exp << 10) | new_mantissa
     return half_precision
 
-# --- Temel Yapılar ---
 class Neuron:
     def __init__(self, inputs_list=None, param_list=None, const_list=None, body=None, logic=None, dt=None):
         self.Inputs = inputs_list if inputs_list else []
@@ -277,7 +276,7 @@ class Neuron:
         self.Constlist = const_list if const_list else []
         self.Body = body if body else []
         self.Logic = logic if logic else ""
-        self.dt = dt     # Sayısal entegrasyon zaman adımı (Örn: 0.78125 ms)
+        self.dt = dt
 
 class LogicNode:
     def __init__(self, block_type, condition=None, level=0):
@@ -288,11 +287,11 @@ class LogicNode:
         self.parent = None
         self.level = level
 
-# --- Derleyici Sınıfı ---
 class NMCCompiler:
-    def __init__(self, neuron: Neuron, base_offset: int = None):
+    def __init__(self, neuron: Neuron, base_offset: int = None, input_base: int = 0):
         self.neuron = neuron
-        self.base_offset = base_offset  # <-- YENİ EKLENEN OFFSET PARAMETRESİ
+        self.base_offset = base_offset
+        self.input_base = int(input_base)
         self.memory_map = {}
         self.register_map = {}
         self.assembly_code = []
@@ -665,7 +664,6 @@ class NMCCompiler:
     def build_memory_and_registers(self):
         self.optimize_and_fold_constants()
 
-        # Budama (Referans Kontrolü)
         referenced_symbols = set()
         for line in self.neuron.Logic.split('\n'):
             words = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', line)
@@ -678,36 +676,29 @@ class NMCCompiler:
                 for elem in term["elements"]:
                     referenced_symbols.add(elem)
 
-        # 1. INPUTS Adresleme: Her zaman M(0)'dan başlar (Current Handler ile uyumlu)
-        idx = 0
+        idx = self.input_base
         for inp in self.neuron.Inputs:
             self.memory_map[inp] = idx
             idx += 1
 
-        # ---------------------------------------------------------------------
-        # 2. BASE OFFSET UYGULAMASI (Girişler ile Sabitleri/Parametreleri Ayırma)
-        # ---------------------------------------------------------------------
         if self.base_offset is not None:
             if self.base_offset < idx:
                 raise ValueError(
                     f"Compiler Error: base_offset ({self.base_offset}) cannot be smaller than "
-                    f"number of inputs ({idx})! Inputs occupy M(0) to M({idx-1})."
+                    f"input end address ({idx})! Inputs occupy M({self.input_base}) to M({idx-1})."
                 )
             idx = self.base_offset
 
-        # 3. 1.0 Sabiti:
         self.memory_map["1.0"] = idx
         self.register_map["1.0"] = "x1"
         idx += 1
 
-        # Sadece kullanılan dinamik parametreleri ekle
         for param in self.param_names:
             if param in referenced_symbols:
                 if param not in self.memory_map:
                     self.memory_map[param] = idx
                     idx += 1
 
-        # Sadece kullanılan sabitleri ekle
         for const in self.const_names:
             if const in referenced_symbols:
                 if const not in self.memory_map:
@@ -719,7 +710,6 @@ class NMCCompiler:
                     self.memory_map[recip_name] = idx
                     idx += 1
 
-        # Gövdedeki hedef değişkenleri ekleme
         for eq in self.optimized_body_equations:
             target = eq["target"]
             if target not in self.memory_map:
@@ -736,7 +726,6 @@ class NMCCompiler:
             self.memory_map["TEMP_ACC"] = idx
             idx += 1
 
-        # Sayısal sabitleri bellek haritasına kaydet
         for symbol in sorted(referenced_symbols):
             if re.match(r'^-?\d+(?:\.\d+)?$', symbol):
                 if symbol not in self.memory_map:
@@ -797,22 +786,18 @@ class NMCCompiler:
         num_slots = max(self.memory_map.values()) + 1
         raw_values = [0.0] * num_slots
 
-        # 1. Inputs (Başlangıçta 0.0)
         for inp in self.neuron.Inputs:
             if inp in self.memory_map:
                 idx = self.memory_map[inp]
                 raw_values[idx] = 0.0
 
-        # 2. 1.0 Constant
         raw_values[self.memory_map["1.0"]] = 1.0
 
-        # 3. Paramlist Assignments
         for param in self.param_names:
             if param in self.memory_map:
                 idx = self.memory_map[param]
                 raw_values[idx] = self.param_values.get(param, 0.0)
 
-        # 4. Constlist Assignments
         for const in self.const_names:
             val = self.const_values.get(const, 0.0)
             if const in self.memory_map:
