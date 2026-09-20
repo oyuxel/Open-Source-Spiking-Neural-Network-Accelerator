@@ -32,15 +32,29 @@ ARCHITECTURE SUMMER_WINE OF NMC_LOC_REGSPACE IS
     WRCNTRL : process (CLK) begin
 
         if (rising_edge(CLK)) then
+
+            if RST = '1' then
+
+                REGSPACE <= (others=>(others=>'0'));
+
+            else
+
             if (WR_EN = '1') then
                 REGSPACE(to_integer(unsigned(WR_ADDR))) <= DATA_IN;
             end if;
+
+            end if;
+
         end if;
 
     end process WRCNTRL;
 
-    DOUT_0 <= REGSPACE(to_integer(unsigned(RD_ADDR_0)));
-    DOUT_1 <= REGSPACE(to_integer(unsigned(RD_ADDR_1)));
+    -- WRITE-FIRST (Bypass) MANTIĞI: Yazılan veriyi aynı anda okumak isteyene doğrudan ver!
+    DOUT_0 <= DATA_IN when (WR_EN = '1' and WR_ADDR = RD_ADDR_0) else 
+              REGSPACE(to_integer(unsigned(RD_ADDR_0)));
+
+    DOUT_1 <= DATA_IN when (WR_EN = '1' and WR_ADDR = RD_ADDR_1) else 
+              REGSPACE(to_integer(unsigned(RD_ADDR_1)));
 
 --    OUTPUT_REGS : process (CLK) begin
 --
