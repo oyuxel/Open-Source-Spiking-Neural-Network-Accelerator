@@ -7,41 +7,37 @@ package processor_primitives is
 
 component NMC is
     Port ( 
-            NMC_CLK                     : in   std_logic;  -- SYNCHRONOUS SOFT RESET
-            NMC_STATE_RST               : in   std_logic;  -- RESETS THE NMC STATES, FP16MAC and REGISTERS
-            FMAC_EXTERN_RST             : in   std_logic;
-            NMC_HARD_RST                : in   std_logic;  -- SYNCHRONOUS HARD RESET (RESETS THE WHOLE IP! INCLUDING MEMORY)
-            --  IP CONTROLS
-            NMC_COLD_START              : in   std_logic; -- START PROGRAM FLOW REGARDLESS OF THE STATE OF THE INPUT CURRENT
-            PARTIAL_CURRENT_RDY         : in   std_logic;
-            -- NMC AXI4LITE REGISTERS
-            NMC_XNEVER_REGION_BASEADDR  : in   std_logic_vector(9 downto 0);
-            NMC_XNEVER_REGION_HIGHADDR  : in   std_logic_vector(9 downto 0);
-            -- FROM DISTRIBUTOR
-            NMODEL_LAST_SPIKE_TIME      : in   STD_LOGIC_VECTOR(7  DOWNTO 0); 
-            NMODEL_SYN_QFACTOR          : in   STD_LOGIC_VECTOR(15 DOWNTO 0); 
-            NMODEL_PF_LOW_ADDR          : in   STD_LOGIC_VECTOR(9  DOWNTO 0); 
-            NMODEL_NPARAM_DATA          : in   STD_LOGIC_VECTOR(15 DOWNTO 0);
-            NMODEL_NPARAM_ADDR          : in   STD_LOGIC_VECTOR(9  DOWNTO 0);
-            NMODEL_REFRACTORY_DUR       : in   std_logic_vector(7  downto 0);
-            NMODEL_PROG_MEM_PORTA_EN    : in   STD_LOGIC;
-            NMODEL_PROG_MEM_PORTA_WEN   : in   STD_LOGIC;
-            -- FROM HYPERCOLUMNS
-            NMC_NMODEL_PSUM_IN          : in   std_logic_vector(15 downto 0);
-            -- TO AXON HANDLER
-            NMC_NMODEL_SPIKE_OUT        : out  std_logic; 
-            NMC_NMODEL_SPIKE_VLD        : out  std_logic; 
-            -- TO REDISTRIBUTOR
-            R_NNMODEL_NEW_SPIKE_TIME    : out  std_logic_vector(7  downto 0);
-            R_NMODEL_NPARAM_DATAOUT     : OUT  STD_LOGIC_VECTOR(15 DOWNTO 0);
-            R_NMODEL_REFRACTORY_DUR     : OUT  std_logic_vector(7  downto 0);
-            REDIST_NMODEL_PORTB_TKOVER  : in   std_logic;
-            REDIST_NMODEL_DADDR         : in   std_logic_vector(9 downto 0);
-            -- IP STATUS FLAGS
-            NMC_NMODEL_FINISHED         : out std_logic;
-            -- ERROR FLAGS
-            NMC_MATH_ERROR              : out std_logic;
-            NMC_MEMORY_VIOLATION        : out std_logic
+         NMC_CLK                     : IN  std_logic;
+         NMC_STATE_RST               : IN  std_logic;
+         FMAC_EXTERN_RST             : IN  std_logic;
+         NMC_HARD_RST                : IN  std_logic;
+         NMC_COLD_START              : IN  std_logic;
+         PARTIAL_CURRENT_RDY         : IN  std_logic;
+         CURRENT_SWITCH_CHANNEL      : IN  std_logic;
+         CURRENT_RESET_CHANNEL       : IN  std_logic;
+         CURRENT_CHANNEL_SWITCHED    : OUT std_logic;
+         CURRENT_RESOURCES_RELEASED  : OUT std_logic;
+         NMC_XNEVER_REGION_BASEADDR  : IN  std_logic_vector(9 downto 0);
+         NMC_XNEVER_REGION_HIGHADDR  : IN  std_logic_vector(9 downto 0);
+         NMODEL_LAST_SPIKE_TIME      : IN  std_logic_vector(7 downto 0);
+         NMODEL_SYN_QFACTOR          : IN  std_logic_vector(15 downto 0);
+         NMODEL_PF_LOW_ADDR          : IN  std_logic_vector(9 downto 0);
+         NMODEL_NPARAM_DATA          : IN  std_logic_vector(15 downto 0);
+         NMODEL_NPARAM_ADDR          : IN  std_logic_vector(9 downto 0);
+         NMODEL_REFRACTORY_DUR       : IN  std_logic_vector(7 downto 0);
+         NMODEL_PROG_MEM_PORTA_EN    : IN  std_logic;
+         NMODEL_PROG_MEM_PORTA_WEN   : IN  std_logic;
+         NMC_NMODEL_PSUM_IN          : IN  std_logic_vector(15 downto 0);
+         REDIST_NMODEL_PORTB_TKOVER  : IN  std_logic;
+         REDIST_NMODEL_DADDR         : IN  std_logic_vector(9 downto 0);
+         NMC_NMODEL_SPIKE_OUT        : OUT std_logic;
+         NMC_NMODEL_SPIKE_VLD        : OUT std_logic;
+         R_NNMODEL_NEW_SPIKE_TIME    : OUT std_logic_vector(7 downto 0);
+         R_NMODEL_NPARAM_DATAOUT     : OUT std_logic_vector(15 downto 0);
+         R_NMODEL_REFRACTORY_DUR     : OUT std_logic_vector(7 downto 0);
+         NMC_NMODEL_FINISHED         : OUT std_logic;
+         NMC_MATH_ERROR              : OUT std_logic;
+         NMC_MEMORY_VIOLATION        : OUT std_logic
     );
 end component NMC;
 
@@ -80,71 +76,73 @@ component BRIDGE is
         ROW               : integer := 16             
         );
     Port(
-        BRIDGE_CLK                 : in  std_logic;
-        BRIDGE_RST                 : in  std_logic;
-        NETWORK_LOW_ADDRESS        : in  std_logic_vector((clogb2(NEURAL_MEM_DEPTH)-1) downto 0);
-        GT_START                   : in  std_logic;
-        GT_COMPLETED               : out std_logic;
-        SKIP_LEARNING_PROCESS      : in  std_logic;
-        -- BRIDGE CONTROLS
-        EVENT_ACCEPTANCE           : out std_logic;
-        EVENT_DETECT               : in  std_logic;
-        -- EVENT ACCEPTANCE
-        READ_MAIN_SPIKE_BUFFER     : out std_logic;
-        READ_CIRCULAR_BUFFER       : out std_logic;
+        BRIDGE_CLK                  : in  std_logic;
+        BRIDGE_RST                  : in  std_logic;
+        BARRIER_SYNC_IN             : in  std_logic;
+        BARRIER_SYNC_OUT            : out std_logic;
+        NETWORK_LOW_ADDRESS         : in  std_logic_vector(clogb2(NEURAL_MEM_DEPTH)-1 downto 0);
+        GT_START                    : in  std_logic;
+        GT_COMPLETED                : out std_logic;
+        SKIP_LEARNING_PROCESS       : in  std_logic;
+        EVENT_ACCEPTANCE            : out std_logic;
+        EVENT_DETECT                : in  std_logic;
+
+        READ_MAIN_SPIKE_BUFFER      : out std_logic;
+        READ_CIRCULAR_BUFFER        : out std_logic;
         READ_AUX_BUFFER             : out std_logic;
         WRITE_OUTBUFFER             : out std_logic;
         WRITE_AUXBUFFER             : out std_logic;
-        -- SPIKE DESTINATION
-        -- SYNAPTIC MEMORY CONTROLS (PORT B)
-        SYNAPTIC_MEM_RDADDR        : out std_logic_vector((clogb2(SYNAPSE_MEM_DEPTH)-1) downto 0);
-        SYNAPTIC_MEM_ENABLE        : out std_logic;
-        SYNAPTIC_MEM_WRADDR        : out std_logic_vector((clogb2(SYNAPSE_MEM_DEPTH)-1) downto 0);
-        SYNAPTIC_MEM_WREN          : out std_logic;
-        -- HYPERCOLUMN CONTROLS
-        HALT_HYPERCOLUMN           : out std_logic;
-        PRE_SYN_DATA_PULL          : out std_logic;
-        DISABLE_COLUMN             : out std_logic;
-        -- NMC CONTROLS
-        NMC_STATE_RST              : out std_logic; 
-        NMC_FMAC_RST               : out std_logic; 
-        NMC_COLD_START             : out std_logic; 
-        NMODEL_LAST_SPIKE_TIME     : out STD_LOGIC_VECTOR(7  DOWNTO 0); 
-        NMODEL_SYN_QFACTOR         : out STD_LOGIC_VECTOR(15 DOWNTO 0); 
-        NMODEL_PF_LOW_ADDR         : out STD_LOGIC_VECTOR(9  DOWNTO 0); 
-        NMODEL_NPARAM_DATA         : out STD_LOGIC_VECTOR(15 DOWNTO 0);
-        NMODEL_NPARAM_ADDR         : out STD_LOGIC_VECTOR(9  DOWNTO 0);
-        NMODEL_REFRACTORY_DUR      : out std_logic_vector(7  downto 0);
-        NMODEL_PROG_MEM_PORTA_EN   : out STD_LOGIC;
-        NMODEL_PROG_MEM_PORTA_WEN  : out STD_LOGIC;
-        R_NNMODEL_NEW_SPIKE_TIME   : in  std_logic_vector(7  downto 0);
-        R_NMODEL_NPARAM_DATAOUT    : in  STD_LOGIC_VECTOR(15 DOWNTO 0);
-        R_NMODEL_REFRACTORY_DUR    : in  std_logic_vector(7  downto 0);
-        REDIST_NMODEL_PORTB_TKOVER : out std_logic;
-        REDIST_NMODEL_DADDR        : out std_logic_vector(9 downto 0);
-        NMC_NMODEL_FINISHED        : in  std_logic;
-        -- SYNAPTIC RAM MANAGEMENT
-        SYNMEM_PORTA_MUX           : out std_logic;
-        DISABLE_LENGINE            : out std_logic;
-        -- ULEARN CONTROLS
-        ACTVATE_LENGINE            : out std_logic;
-        LEARN_RST                  : out std_logic;
-        SYNAPSE_PRUN               : out std_logic;
-        PRUN_THRESH                : out std_logic_vector(7 downto 0);
-        IGNORE_ZEROS               : out std_logic; 
-        IGNORE_SOFTLIM             : out std_logic;  
-        LEARNING_RATE              : out std_logic_vector(7 downto 0);
-        TABLE_LOW_ADDRESS          : out std_logic_vector(15 downto 0);
-        NEURON_WMAX                : out std_logic_vector(7 downto 0);
-        NEURON_WMIN                : out std_logic_vector(7 downto 0);
-        NEURON_SPK_TIME            : out std_logic_vector(7 downto 0);
-        -- NEURAL MEMORY INTERFACE
-        addra                      : out std_logic_vector((clogb2(NEURAL_MEM_DEPTH)-1) downto 0); 
-        wea                        : out std_logic;	                
-        ena                        : out std_logic;                       			     
-        rsta                       : out std_logic;                       			     
-        douta                      : in  std_logic_vector(31 downto 0);            
-        dina                       : out std_logic_vector(31 downto 0)            
+
+        SYNAPTIC_MEM_RDADDR         : out std_logic_vector(clogb2(SYNAPSE_MEM_DEPTH)-1 downto 0);
+        SYNAPTIC_MEM_ENABLE         : out std_logic;
+        SYNAPTIC_MEM_WRADDR         : out std_logic_vector(clogb2(SYNAPSE_MEM_DEPTH)-1 downto 0);
+        SYNAPTIC_MEM_WREN           : out std_logic;
+
+        HALT_HYPERCOLUMN            : out std_logic;
+        PRE_SYN_DATA_PULL           : out std_logic;
+        DISABLE_COLUMN              : out std_logic;
+
+        NMC_STATE_RST               : out std_logic;
+        NMC_FMAC_RST                : out std_logic;
+        NMC_COLD_START              : out std_logic;
+        SWITCH_CHANNEL              : out std_logic;
+        RESET_CHANNEL               : out std_logic;
+        NMODEL_LAST_SPIKE_TIME      : out std_logic_vector(7 downto 0);
+        NMODEL_SYN_QFACTOR          : out std_logic_vector(15 downto 0);
+        NMODEL_PF_LOW_ADDR          : out std_logic_vector(9 downto 0);
+        NMODEL_NPARAM_DATA          : out std_logic_vector(15 downto 0);
+        NMODEL_NPARAM_ADDR          : out std_logic_vector(9 downto 0);
+        NMODEL_REFRACTORY_DUR       : out std_logic_vector(7 downto 0);
+        NMODEL_PROG_MEM_PORTA_EN    : out std_logic;
+        NMODEL_PROG_MEM_PORTA_WEN   : out std_logic;
+
+        R_NNMODEL_NEW_SPIKE_TIME    : in  std_logic_vector(7 downto 0);
+        R_NMODEL_NPARAM_DATAOUT     : in  std_logic_vector(15 downto 0);
+        R_NMODEL_REFRACTORY_DUR     : in  std_logic_vector(7 downto 0);
+        REDIST_NMODEL_PORTB_TKOVER  : out std_logic;
+        REDIST_NMODEL_DADDR         : out std_logic_vector(9 downto 0);
+        NMC_NMODEL_FINISHED         : in  std_logic;
+
+        SYNMEM_PORTA_MUX            : out std_logic;
+        DISABLE_LENGINE             : out std_logic;
+        ACTVATE_LENGINE             : out std_logic;
+        LEARN_RST                   : out std_logic;
+        SYNAPSE_PRUN                : out std_logic;
+        PRUN_THRESH                 : out std_logic_vector(7 downto 0);
+        IGNORE_ZEROS                : out std_logic;
+        IGNORE_SOFTLIM              : out std_logic;
+        LEARNING_RATE               : out std_logic_vector(7 downto 0);
+        TABLE_LOW_ADDRESS           : out std_logic_vector(15 downto 0);
+        NEURON_WMAX                 : out std_logic_vector(7 downto 0);
+        NEURON_WMIN                 : out std_logic_vector(7 downto 0);
+        NEURON_SPK_TIME             : out std_logic_vector(7 downto 0);
+
+        addra                       : out std_logic_vector(clogb2(NEURAL_MEM_DEPTH)-1 downto 0);
+        wea                         : out std_logic;
+        ena                         : out std_logic;
+        rsta                        : out std_logic;
+        douta                       : in  std_logic_vector(31 downto 0);
+        dina                        : out std_logic_vector(31 downto 0)       
 
         );
 end component BRIDGE;
