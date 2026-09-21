@@ -317,36 +317,29 @@ class NMCCompiler:
 
 1. CONTINUOUS DIFFERENTIAL EQUATIONS (ODE SOLVER)
 --------------------------------------------------------------------------------
-* You can write continuous ODEs directly in the Body:
+* Continuous ODEs can be specified directly:
   - Form 1: 'dV/dt = RHS'
   - Form 2: 'tau * dV/dt = RHS'
 * Time step must be set on the neuron (e.g. neuron.dt = 0.78125).
-* The compiler automatically discretizes the equation using Forward Euler into 
-  'V_next = V + (dt/tau) * (RHS)', folds all constants, and produces optimized code.
+* Discretized directly in-place: V = V + (dt/tau) * (RHS)
 
-2. MULTI-SYNAPTIC INPUTS
+2. MULTI-SYNAPTIC INPUTS & XNEVER RE-LOCATION
 --------------------------------------------------------------------------------
-* Pre-synaptic inputs are defined in 'Inputs' list (e.g. ["g_e", "g_i"]).
-* Inputs are mapped to the very beginning of the SRAM memory, starting from M(0).
-* Note: A neuron must have at least one input defined in 'Inputs'.
+* Inputs are mapped starting at 'input_base' (defaults to 0 or XNEVER_BASE).
+* Parameters and constants are mapped starting at 'base_offset'.
 
 3. SUPPORTED MATHEMATICAL OPERATIONS & SYNTAX
 --------------------------------------------------------------------------------
 * Basic Arithmetic: '+', '-', '*', '/' are fully supported.
-* Division Constraint (Division Rule): Dynamic variables CANNOT be used as divisors.
-* Exponentiation (**): Any integer power (e.g., 'v**2', 'u**20') is supported.
-* Transcendental Functions: exp(x), sin(x), cos(x), ln(x), log10(x) (Taylor series).
-* Restrictions: tan(x) is strictly prohibited due to dynamic division limits.
+* Division Constraint: Dynamic variables CANNOT be used as divisors.
+* Exponentiation (**): Any integer power is supported.
+* Transcendental Functions: exp(x), sin(x), cos(x), ln(x), log10(x).
 
 4. LOGIC BLOCK & REFRACTORY PERIOD SYNTAX
 --------------------------------------------------------------------------------
 * Indentation-based nested-if logic structures are supported.
 * Comparison operators: '>', '<', '>=', '<=', '=', '!=', '=='
 * Refractory Period Instruction: 'ref_period = N' (where 0 <= N <= 127).
-* Inline comments starting with '#' are fully supported.
-
-================================================================================
-        NMC Compiler is fully optimized for minimal SRAM & hardware designs.
 ================================================================================
 """
         print(help_text)
@@ -401,10 +394,11 @@ class NMCCompiler:
 
                 dt_val = float(self.neuron.dt)
                 
+                # YERİNDE DURUM GÜNCELLEMESİ (In-Place: v = v + ...)
                 if coeff:
-                    discrete_eq = f"{var}_next = {var} + ({dt_val} / {coeff}) * ({rhs.strip()})"
+                    discrete_eq = f"{var} = {var} + ({dt_val} / {coeff}) * ({rhs.strip()})"
                 else:
-                    discrete_eq = f"{var}_next = {var} + ({dt_val}) * ({rhs.strip()})"
+                    discrete_eq = f"{var} = {var} + ({dt_val}) * ({rhs.strip()})"
                 
                 processed_body.append(discrete_eq)
             else:
@@ -679,11 +673,13 @@ class NMCCompiler:
                 for elem in term["elements"]:
                     referenced_symbols.add(elem)
 
+        # 1. Girişler (M(input_base) ... )
         idx = self.input_base
         for inp in self.neuron.Inputs:
             self.memory_map[inp] = idx
             idx += 1
 
+        # 2. Base Offset ile Sabitleri ve Parametreleri Ayır
         if self.base_offset is not None:
             if self.base_offset < idx:
                 raise ValueError(
@@ -692,16 +688,19 @@ class NMCCompiler:
                 )
             idx = self.base_offset
 
+        # 3. 1.0 Sabiti
         self.memory_map["1.0"] = idx
         self.register_map["1.0"] = "x1"
         idx += 1
 
+        # Dinamik Parametreler (v_n, v_thresh vb.)
         for param in self.param_names:
             if param in referenced_symbols:
                 if param not in self.memory_map:
                     self.memory_map[param] = idx
                     idx += 1
 
+        # Sabitler
         for const in self.const_names:
             if const in referenced_symbols:
                 if const not in self.memory_map:
@@ -713,11 +712,16 @@ class NMCCompiler:
                     self.memory_map[recip_name] = idx
                     idx += 1
 
+        # Hedef Değişkenler: Eğer hedef '<var>_next' ise ve '<var>' zaten parametrelerde varsa,
+        # AYRI BİR ADRES AÇMA! Doğrudan o parametrenin adresine eşitle (In-Place Update)!
         for eq in self.optimized_body_equations:
             target = eq["target"]
             if target not in self.memory_map:
-                self.memory_map[target] = idx
-                idx += 1
+                if target.endswith("_next") and target[:-5] in self.memory_map:
+                    self.memory_map[target] = self.memory_map[target[:-5]]
+                else:
+                    self.memory_map[target] = idx
+                    idx += 1
 
         has_multi_factor = False
         for eq in self.optimized_body_equations:
