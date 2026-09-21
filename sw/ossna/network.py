@@ -2,10 +2,9 @@
 
 import math
 import numpy as np
-from typing import Union, List, Dict, Optional
+from typing import Union, List, Dict, Optional, Tuple
 
 class InputEncoder:
-
     def __init__(self, mode: str = "poisson", time_window: int = 100, seed: int = 0x12345678, data_count: int = None):
         self.mode = mode.lower()
         if self.mode not in ["poisson", "latency"]:
@@ -15,32 +14,30 @@ class InputEncoder:
         self.data_count = data_count
 
     def encode(self, raw_features: np.ndarray) -> np.ndarray:
-
         features = np.clip(np.array(raw_features, dtype=np.float64), 0.0, 1.0)
-        
         if self.mode == "poisson":
             ir_values = np.round(features * 0xFFFFFFFF)
             return ir_values.astype(np.uint32)
-            
         elif self.mode == "latency":
             step_timings = np.round((1.0 - features) * (self.time_window - 1))
             ir_values = np.clip(step_timings, 0, self.time_window - 1)
             return ir_values.astype(np.uint32)
 
 class Projection:
-
     def __init__(self, name: str, source, target, target_pin: str,
                  weights: np.ndarray, scheme: str = "dense",
+                 input_slice: Optional[Tuple[int, int]] = None,
                  synapse_model=None, learning: bool = False,
                  learning_rate: float = 0.05,
                  pruning: bool = False, pruning_threshold: Optional[float] = None,
                  ignore_zero_synapses: bool = True,
                  w_min: float = 0.0, w_max: float = 127.0):
         self.name = name
-        self.source = source          
-        self.target = target          
-        self.target_pin = target_pin  
-        self.weights = weights        
+        self.source = source
+        self.target = target
+        self.target_pin = target_pin
+        self.input_slice = input_slice
+        self.weights = weights
         self.scheme = scheme
         self.synapse_model = synapse_model
         self.learning = learning and (synapse_model is not None)
@@ -68,7 +65,6 @@ class Layer:
         return None
 
 class Network:
- 
     def __init__(self, input_size: int):
         self.input_size = int(input_size)
         self.layers: List[Layer] = []
@@ -84,7 +80,6 @@ class Network:
         return layer
 
     def _create_weights(self, in_size: int, out_size: int, init_method, w_min: float, w_max: float, q_factor: float, connectivity) -> np.ndarray:
-
         if isinstance(init_method, np.ndarray):
             if init_method.shape != (in_size, out_size):
                 raise ValueError(f"Weight matrix shape mismatch! Expected: ({in_size}, {out_size}), Got: {init_method.shape}")
@@ -107,7 +102,6 @@ class Network:
             raise ValueError(f"Unknown weight configuration: {init_method}")
 
         W_float = np.clip(W_float, w_min, w_max)
-
         W_int8 = np.clip(np.round(W_float / q_factor), -128, 127).astype(np.int8)
 
         if init_method in ["all_to_all_except_self", "wta"] and in_size == out_size:
@@ -120,6 +114,7 @@ class Network:
         return W_int8
 
     def add_projection(self, name: str, source: Union[str, Layer], target: Layer, target_pin: str,
+                       input_slice: Optional[Tuple[int, int]] = None,
                        weights: Union[str, float, int, np.ndarray] = "uniform",
                        scheme: str = "dense",
                        synapse_model=None,
@@ -135,7 +130,14 @@ class Network:
             )
 
         if isinstance(source, str) and source.lower() == "input":
-            source_size = self.input_size
+            if input_slice is not None:
+                start_idx, end_idx = input_slice
+                if not (0 <= start_idx < end_idx <= self.input_size):
+                    raise ValueError(f"Invalid input_slice {input_slice} for total input size {self.input_size}!")
+                source_size = end_idx - start_idx
+            else:
+                source_size = self.input_size
+                input_slice = (0, self.input_size)
         elif isinstance(source, Layer):
             source_size = source.size
         else:
@@ -148,7 +150,7 @@ class Network:
 
         init_method = scheme if scheme in ["all_to_all_except_self", "wta"] else weights
         if scheme in ["all_to_all_except_self", "wta"] and isinstance(weights, (int, float)):
-            w_min = float(weights) 
+            w_min = float(weights)
 
         weight_matrix_int8 = self._create_weights(source_size, target_size, init_method, w_min, w_max, q_factor, connectivity="dense")
 
@@ -157,6 +159,7 @@ class Network:
             source=source,
             target=target,
             target_pin=target_pin,
+            input_slice=input_slice,
             weights=weight_matrix_int8,
             scheme=scheme,
             synapse_model=synapse_model,
@@ -206,7 +209,6 @@ class Network:
                 s_id = core.slaves.synapse(c)
                 depth = core.slaves.get(s_id).depth_words
                 packed_data = core.dma_read(slave=s_id, count=depth, bram_addr=0)
-                # Unpack: [15:8] Weight only (INT8)
                 weights_only = (packed_data >> 8).astype(np.int8)
                 checkpoint[f"syn_col_{c}"] = weights_only
         else:
@@ -246,7 +248,10 @@ class Network:
             for p in l.projections:
                 syn_count = p.weights.shape[0] * p.weights.shape[1]
                 total_synapses += syn_count
-                src_name = "Input (D2S/Main)" if isinstance(p.source, str) else p.source.name
+                if isinstance(p.source, str):
+                    src_name = f"Input {p.input_slice}"
+                else:
+                    src_name = p.source.name
                 learn_str = f"ON (η={p.learning_rate})" if p.learning else "OFF (Frozen)"
                 scheme_str = f"{p.scheme} [{p.w_min:.1f}..{p.w_max:.1f}]"
                 print(f"{l.name:<16} | {p.target_pin:<12} | {src_name:<16} | {syn_count:<10} | {learn_str:<12} | {p.q_factor:<8.4f} | {scheme_str:<22}")
