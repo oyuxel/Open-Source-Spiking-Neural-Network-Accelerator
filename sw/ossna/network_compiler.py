@@ -21,11 +21,10 @@ OP_ULEARNLOWSYN    = 0x8
 OP_ULEARNHIGHSYN   = 0x9
 OP_ENDFLOW         = 0xA
 
-ENDFLOW_NEXT_NEURON            = 1 << 0
-ENDFLOW_BARRIER_SYNC           = 1 << 1
-ENDFLOW_START_LEARNING         = 1 << 2
-ENDFLOW_SKIP_LEARNING_TIMESTEP = 1 << 3
-ENDFLOW_TIMESTEP_UPDATE        = 1 << 4
+ENDFLOW_NEXT_NEURON   = 1 << 0
+ENDFLOW_BARRIER_SYNC  = 1 << 1
+ENDFLOW_LEARNING_EN   = 1 << 2
+ENDFLOW_TIMESTEP_UP   = 1 << 3
 
 class CompiledNetwork:
     def __init__(self, hw_info: dict):
@@ -261,10 +260,6 @@ class NetworkCompiler:
                     p_addr = nmc_comp.memory_map[p_name]
                     artifact.verbose_nmc_memory_map[p_addr] = f"ADDR {p_addr:<4} | HEX: 0000 | [DYNAMIC PARAM] {p_name} (Loaded by Bridge)"
 
-            if "v_next" in nmc_comp.memory_map:
-                v_addr = nmc_comp.memory_map["v_next"]
-                artifact.verbose_nmc_memory_map[v_addr] = f"ADDR {v_addr:<4} | HEX: 0000 | [TARGET VAR] v_next"
-
             current_footprint_offset = max(nmc_comp.memory_map.values()) + 1
 
         artifact.slave_payloads[4] = nmc_bram_image
@@ -328,6 +323,12 @@ class NetworkCompiler:
                         
                         proj_syn_bounds = {}
 
+                        # 1. PFLOWRFPLST (Initial Refractory = 0)
+                        cmd_pflow = (OP_PFLOWRFPLST << 28) | ((pflow_start & 0x3FF) << 16) | (0x00 << 8) | 0x7F
+                        neural_brams[col].append(cmd_pflow)
+                        artifact.verbose_neural[col].append(f"HEX: {cmd_pflow:08X} | PFLOWRFPLST -> NMC Address: {pflow_start}, Ref: 0, LastSpk: 127")
+
+                        # 2. CHANNEL TRIADS (SSSDSYNQ, SYNLOW, SYNHIGH)
                         for pin_idx, pin_name in enumerate(layer.neuron_model.Inputs):
                             proj = layer.get_projection_for_pin(pin_name)
                             if proj is None:
@@ -378,11 +379,7 @@ class NetworkCompiler:
                             artifact.verbose_neural[col].append(f"HEX: {cmd_synlow:08X} | SYNLOW   (Pin: {pin_name}) -> Address: {syn_low}")
                             artifact.verbose_neural[col].append(f"HEX: {cmd_synhigh:08X} | SYNHIGH  (Pin: {pin_name}) -> Address: {syn_high}")
 
-                        ref_period = 2
-                        cmd_pflow = (OP_PFLOWRFPLST << 28) | ((pflow_start & 0x3FF) << 16) | ((ref_period & 0xFF) << 8) | 0x7F
-                        neural_brams[col].append(cmd_pflow)
-                        artifact.verbose_neural[col].append(f"HEX: {cmd_pflow:08X} | PFLOWRFPLST -> NMC Address: {pflow_start}, Ref: {ref_period}, LastSpk: 127")
-
+                        # 3. NPADDRDATA PARAMETERS
                         for p_name in footprint["param_names"]:
                             p_addr = footprint["memory_map"][p_name]
                             p_val  = footprint["param_values"].get(p_name, 0.0)
@@ -391,12 +388,7 @@ class NetworkCompiler:
                             neural_brams[col].append(cmd_param)
                             artifact.verbose_neural[col].append(f"HEX: {cmd_param:08X} | NPADDRDATA -> M({p_addr}) = {p_val} ({p_name})")
 
-                        if "v_next" in footprint["memory_map"]:
-                            v_next_addr = footprint["memory_map"]["v_next"]
-                            cmd_vnext = (OP_NPADDRDATA << 28) | ((v_next_addr & 0x3FF) << 16) | 0x0000
-                            neural_brams[col].append(cmd_vnext)
-                            artifact.verbose_neural[col].append(f"HEX: {cmd_vnext:08X} | NPADDRDATA -> M({v_next_addr}) = 0.0 (v_next)")
-
+                        # 4. STDP CODES
                         has_any_learning = False
                         for proj in layer.projections:
                             if proj.learning and proj.synapse_model is not None:
@@ -425,25 +417,40 @@ class NetworkCompiler:
                                 artifact.verbose_neural[col].append(f"HEX: {cmd_ulow:08X} | ULEARNLOWSYNADDR (Pin: {proj.target_pin}) -> Address: {syn_l}")
                                 artifact.verbose_neural[col].append(f"HEX: {cmd_uhigh:08X} | ULEARNHIGHSYNADDR (Pin: {proj.target_pin}) -> Address: {syn_h}")
 
+                        # =====================================================
+                        # 5. ENDFLOW 
+                        # =====================================================
+                        end_flag = 0
+
                         if has_any_learning:
-                            end_flag = ENDFLOW_START_LEARNING
+                            end_flag |= ENDFLOW_LEARNING_EN
+
+                        if is_last_layer and is_last_pass_of_layer:
+                            end_flag |= ENDFLOW_TIMESTEP_UP  
                         else:
-                            if is_last_layer and is_last_pass_of_layer:
-                                end_flag = ENDFLOW_TIMESTEP_UPDATE
-                            elif is_last_pass_of_layer:
-                                end_flag = ENDFLOW_SKIP_LEARNING_TIMESTEP
-                            else:
-                                end_flag = ENDFLOW_NEXT_NEURON
+                            end_flag |= ENDFLOW_NEXT_NEURON  
 
                         cmd_end = (OP_ENDFLOW << 28) | end_flag
                         neural_brams[col].append(cmd_end)
-                        artifact.verbose_neural[col].append(f"HEX: {cmd_end:08X} | ENDFLOW -> Flag: {end_flag} (Complete)")
+                        artifact.verbose_neural[col].append(
+                            f"HEX: {cmd_end:08X} | ENDFLOW -> Flags: [Next={bool(end_flag & 1)}, Barrier=False, STDP={bool(end_flag & 4)}, Timestep={bool(end_flag & 8)}]"
+                        )
 
                     else:
-                        cmd_dummy = (OP_ENDFLOW << 28) | ENDFLOW_BARRIER_SYNC
+
+                        dummy_flag = ENDFLOW_BARRIER_SYNC  
+
+                        if is_last_layer and is_last_pass_of_layer:
+                            dummy_flag |= ENDFLOW_TIMESTEP_UP 
+                        else:
+                            dummy_flag |= ENDFLOW_NEXT_NEURON 
+                        
+                        cmd_dummy = (OP_ENDFLOW << 28) | dummy_flag
                         neural_brams[col].append(cmd_dummy)
                         artifact.verbose_neural[col].append(f"\n# --- Layer: {layer.name} | DUMMY/BARRIER ---")
-                        artifact.verbose_neural[col].append(f"HEX: {cmd_dummy:08X} | ENDFLOW -> BARRIER SYNC (Waiting...)")
+                        artifact.verbose_neural[col].append(
+                            f"HEX: {cmd_dummy:08X} | ENDFLOW -> DUMMY BARRIER [Next={bool(dummy_flag & 1)}, Barrier=True, Timestep={bool(dummy_flag & 8)}]"
+                        )
 
         neural_base = 6 + self.num_cols
         for c in range(self.num_cols):
