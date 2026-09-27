@@ -1,10 +1,6 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use ieee.numeric_std.all;
-Library UNISIM;
-use UNISIM.vcomponents.all;
-Library UNIMACRO;
-use UNIMACRO.vcomponents.all;
 
 entity NMC is
     Port ( 
@@ -48,6 +44,7 @@ architecture dance_me_to_the_end_of_love of NMC is
         Port (
             CLK                 : in  std_logic;
             RST                 : in  std_logic;
+            REFRACTORY          : in  std_logic;
             SWITCH_CHANNEL      : in  std_logic;
             RESET_CHANNEL       : in  std_logic;
             CHANNEL_SWITCHED    : out std_logic;
@@ -140,6 +137,44 @@ architecture dance_me_to_the_end_of_love of NMC is
             DONE    : out std_logic
         );
     end component SS_2_HP;
+
+    function clogb2( depth : natural) return integer is
+        variable temp    : integer := depth;
+        variable ret_val : integer := 0;
+        begin
+            while temp > 1 loop
+                ret_val := ret_val + 1;
+                temp    := temp / 2;
+            end loop;
+            return ret_val;
+    end function;
+
+    component AUTO_RAM_INSTANCE is
+        generic (
+            RAM_WIDTH       : integer := 32;                
+            RAM_DEPTH       : integer := 2048  ;            
+            RAM_PERFORMANCE : string  := "LOW_LATENCY"      
+            );
+
+        port (
+                addra : in std_logic_vector((clogb2(RAM_DEPTH)-1) downto 0);  
+                addrb : in std_logic_vector((clogb2(RAM_DEPTH)-1) downto 0);  
+                dina  : in std_logic_vector(RAM_WIDTH-1 downto 0);		      
+                dinb  : in std_logic_vector(RAM_WIDTH-1 downto 0);		      
+                clka  : in std_logic;                       			      
+                clkb  : in std_logic;                       			      
+                wea   : in std_logic;                       			      
+                web   : in std_logic;                       			      
+                ena   : in std_logic;                       			      
+                enb   : in std_logic;                       			      
+                rsta  : in std_logic;                       			      
+                rstb  : in std_logic;                       			      
+                regcea: in std_logic;                       			      
+                regceb: in std_logic;                       			      
+                douta : out std_logic_vector(RAM_WIDTH-1 downto 0);   	
+                doutb : out std_logic_vector(RAM_WIDTH-1 downto 0)  
+            );
+    end component AUTO_RAM_INSTANCE;
 
     signal CH_RESOURCES_RELEASED : std_logic; 
     signal CH_FMAC_CLR           : std_logic;        
@@ -248,7 +283,7 @@ architecture dance_me_to_the_end_of_love of NMC is
     
     signal FINAL_BRAM_ADDRA     : std_logic_vector(9 downto 0);
     signal FINAL_BRAM_DIA       : std_logic_vector(15 downto 0);
-    signal FINAL_BRAM_WEA       : std_logic_vector(1 downto 0);
+    signal FINAL_BRAM_WEA       : std_logic;
     signal FINAL_BRAM_ENA       : std_logic;
     
     signal BRAM_DOB             : std_logic_vector(15 downto 0);
@@ -270,6 +305,7 @@ begin
     Port Map(
         CLK                 => NMC_CLK,
         RST                 => NMC_STATE_RST,
+        REFRACTORY          => REFRACTORY_FLAG,
         SWITCH_CHANNEL      => CURRENT_SWITCH_CHANNEL,
         RESET_CHANNEL       => CURRENT_RESET_CHANNEL,
         CHANNEL_SWITCHED    => CURRENT_CHANNEL_SWITCHED,
@@ -331,7 +367,7 @@ begin
     TCAST : SS_2_HP
     Port Map(
         CLK     => NMC_CLK,
-        RST     => NMC_STATE_RST,
+        RST     => NMC_STATE_RST or REFRACTORY_FLAG,
         SS_IN   => NMC_NMODEL_PSUM_IN,
         HP_OUT  => HP_OUT_REG,
         START   => PARTIAL_CURRENT_RDY,
@@ -551,9 +587,9 @@ begin
                         CH_BRAM_DIA        when CH_RESOURCES_RELEASED = '0' else
                         EX_OP2;
 
-    FINAL_BRAM_WEA   <= NMODEL_PROG_MEM_PORTA_WEN & NMODEL_PROG_MEM_PORTA_WEN when NMODEL_PROG_MEM_PORTA_EN = '1' else
-                        CH_BRAM_WEA & CH_BRAM_WEA                             when CH_RESOURCES_RELEASED = '0' else
-                        REG_ID_EX.MEM_WE & REG_ID_EX.MEM_WE;
+    FINAL_BRAM_WEA   <= NMODEL_PROG_MEM_PORTA_WEN  when NMODEL_PROG_MEM_PORTA_EN = '1' else
+                        CH_BRAM_WEA                when CH_RESOURCES_RELEASED = '0' else
+                        REG_ID_EX.MEM_WE;
 
     PROCESS(NMODEL_PROG_MEM_PORTA_EN, CH_RESOURCES_RELEASED, CH_BRAM_ENA, STALL_SIG, REG_ID_EX, REG_EX_MEM)
     BEGIN
@@ -574,35 +610,30 @@ begin
         END IF;
     END PROCESS;
 
-    NMC_MAIN_MEMORY : BRAM_TDP_MACRO
-    generic map (
-        BRAM_SIZE     => "18Kb",
-        DEVICE        => "7SERIES",
-        DOA_REG       => 0,
-        DOB_REG       => 0,
-        WRITE_WIDTH_A => 16,
-        READ_WIDTH_A  => 16,
-        WRITE_WIDTH_B => 16,
-        READ_WIDTH_B  => 16
-    )
-    port map (
-        DOA     => BRAM_DOA,
-        DOB     => BRAM_DOB,
-        ADDRA   => FINAL_BRAM_ADDRA,
-        ADDRB   => BRAM_ADDRB,
-        CLKA    => NMC_CLK,
-        CLKB    => NMC_CLK,
-        DIA     => FINAL_BRAM_DIA,
-        DIB     => (others => '0'),
-        ENA     => FINAL_BRAM_ENA,
-        ENB     => '1',
-        REGCEA  => '1',
-        REGCEB  => '1',
-        RSTA    => NMC_HARD_RST,
-        RSTB    => NMC_HARD_RST,
-        WEA     => FINAL_BRAM_WEA,
-        WEB     => "00"
-    );
+    NMC_MAIN_MEMORY : AUTO_RAM_INSTANCE
+        generic map(
+            RAM_WIDTH       => 16    ,            
+            RAM_DEPTH       => 1024  ,            
+            RAM_PERFORMANCE => "LOW_LATENCY"      
+            )
+        port map(
+                addra  => FINAL_BRAM_ADDRA, 
+                addrb  => BRAM_ADDRB, 
+                dina   => FINAL_BRAM_DIA, 
+                dinb   => (others => '0'), 
+                clka   => NMC_CLK, 
+                clkb   => NMC_CLK, 
+                wea    => FINAL_BRAM_WEA, 
+                web    => '0', 
+                ena    => FINAL_BRAM_ENA, 
+                enb    => '1', 
+                rsta   => NMC_HARD_RST, 
+                rstb   => NMC_HARD_RST, 
+                regcea => '1', 
+                regceb => '1', 
+                douta  => BRAM_DOA,
+                doutb  => BRAM_DOB
+            );
 
     PROCESS(NMC_CLK)
     BEGIN
@@ -657,7 +688,7 @@ begin
                     REFRACTORY_REG <= NMODEL_REFRACTORY_DUR;
                 elsif (REG_MEM_WB.SET_REF = '1') then
                     REFRACTORY_REG <= REG_MEM_WB.REF_VAL;
-                elsif (REFRACTORY_REG /= X"00") then
+                elsif (REFRACTORY_REG /= X"00" and SPK_VLD_PULSE = '1') then
                     REFRACTORY_REG <= std_logic_vector(unsigned(REFRACTORY_REG) - 1);
                 end if;
 
@@ -676,7 +707,7 @@ begin
     NMC_NMODEL_FINISHED  <= LATCH_FINISHED;
     NMC_NMODEL_SPIKE_VLD <= SPK_VLD_PULSE;
 
-    REFRACTORY_FLAG <= '0' when REFRACTORY_REG = X"00" else '1';
+    REFRACTORY_FLAG <= '0' when NMODEL_REFRACTORY_DUR = X"00" else '1';
     R_NNMODEL_NEW_SPIKE_TIME <= std_logic_vector(UPD_LAST_SPIKE_TIME);
     R_NMODEL_REFRACTORY_DUR  <= REFRACTORY_REG;
     R_NMODEL_NPARAM_DATAOUT  <= BRAM_DOB;

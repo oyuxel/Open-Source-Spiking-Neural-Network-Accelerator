@@ -24,9 +24,6 @@ ARCHITECTURE SUMMER_WINE OF NMC_LOC_REGSPACE IS
     attribute RAM_STYLE : string;
     attribute RAM_STYLE of REGSPACE: signal is "DISTRIBUTED";
 
-    signal DOUT_0_REG : STD_LOGIC_VECTOR(15 DOWNTO 0);
-    signal DOUT_1_REG : STD_LOGIC_VECTOR(15 DOWNTO 0);
-
     BEGIN
 
     WRCNTRL : process (CLK) begin

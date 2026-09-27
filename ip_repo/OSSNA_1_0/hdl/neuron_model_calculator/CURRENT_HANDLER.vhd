@@ -7,6 +7,7 @@ entity CURRENT_HANDLER is
         CLK                 : in  std_logic;
         RST                 : in  std_logic; 
         
+        REFRACTORY          : in  std_logic;
         SWITCH_CHANNEL      : in  std_logic; 
         RESET_CHANNEL       : in  std_logic; 
         CHANNEL_SWITCHED    : out std_logic; 
@@ -31,14 +32,19 @@ architecture dracula of CURRENT_HANDLER is
         IDLE_ACCUMULATE,    
         WRITE_BRAM,         
         COMMIT_AND_ACK,     
-        WAIT_SIGNAL_DROP    
+        WAIT_SIGNAL_DROP ,
+        SIGNOFF   
     );
 
     signal STATE        : STATE_TYPE;
     signal WRITE_PTR    : unsigned(9 downto 0);
     signal IS_FINAL_CH  : std_logic;
 
+    signal FMAC_CLR_REG  : std_logic;
+
 begin
+
+    FMAC_CLR <= FMAC_CLR_REG;
 
     PROCESS(CLK)
     BEGIN
@@ -50,7 +56,7 @@ begin
                 WRITE_PTR          <= unsigned(XNEVER_BASE);
                 CHANNEL_SWITCHED   <= '0';
                 RESOURCES_RELEASED <= '0'; 
-                FMAC_CLR           <= '0';
+                FMAC_CLR_REG       <= '0';
                 BRAM_ENA           <= '0';
                 BRAM_WEA           <= '0';
                 BRAM_ADDRA         <= (others => '0');
@@ -62,20 +68,15 @@ begin
 
                     WHEN IDLE_ACCUMULATE =>
                         CHANNEL_SWITCHED <= '0';
-                        FMAC_CLR         <= '0';
+                        FMAC_CLR_REG     <= '0';
                         BRAM_ENA         <= '0';
                         BRAM_WEA         <= '0';
-
-                        IF RESET_CHANNEL = '1' THEN
-                            IS_FINAL_CH        <= '1';
-                            RESOURCES_RELEASED <= '0'; 
-                            STATE              <= WRITE_BRAM;
-
-                        ELSIF SWITCH_CHANNEL = '1' THEN
-                            
-                            IS_FINAL_CH        <= '0';
-                            RESOURCES_RELEASED <= '0';
-                            STATE              <= WRITE_BRAM;
+                        RESOURCES_RELEASED <= '0';
+                        
+                        IF SWITCH_CHANNEL = '1' AND RESET_CHANNEL = '0'  THEN
+                            STATE        <= WRITE_BRAM;
+                        elsif RESET_CHANNEL = '1'  THEN
+                            STATE        <= SIGNOFF;
                         END IF;
 
                     WHEN WRITE_BRAM =>
@@ -89,27 +90,39 @@ begin
                         BRAM_ENA <= '0';
                         BRAM_WEA <= '0';
 
-                        FMAC_CLR <= '1';
+                        FMAC_CLR_REG <= '1';
 
                         CHANNEL_SWITCHED <= '1';
 
-                        IF IS_FINAL_CH = '1' THEN
-                            WRITE_PTR          <= unsigned(XNEVER_BASE);
-                            RESOURCES_RELEASED <= '1';
-                        ELSE
-                            WRITE_PTR          <= WRITE_PTR + 1;
-                            RESOURCES_RELEASED <= '0';
-                        END IF;
+                        WRITE_PTR          <= WRITE_PTR + 1;
+                        RESOURCES_RELEASED <= '0';
 
                         STATE <= WAIT_SIGNAL_DROP;
 
                     WHEN WAIT_SIGNAL_DROP =>
-                        CHANNEL_SWITCHED <= '0';
-                        FMAC_CLR         <= '0';
+
+                        
+                        FMAC_CLR_REG     <= '0';
 
                         IF SWITCH_CHANNEL = '0' AND RESET_CHANNEL = '0' THEN
                             STATE <= IDLE_ACCUMULATE;
+                            CHANNEL_SWITCHED <= '0';
+                        elsif RESET_CHANNEL = '1' THEN
+                            STATE <= SIGNOFF;
                         END IF;
+
+                    WHEN SIGNOFF =>
+
+                        CHANNEL_SWITCHED    <= '0';
+
+                        RESOURCES_RELEASED  <= '1';
+
+                        FMAC_CLR            <= '0';                     
+
+                        BRAM_ADDRA          <= (others=>'0');
+                        BRAM_DIA            <= (others=>'0');
+                        BRAM_WEA            <= '0';
+                        BRAM_ENA            <= '0';
 
                     WHEN OTHERS =>
                         STATE <= IDLE_ACCUMULATE;
