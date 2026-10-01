@@ -38,7 +38,6 @@ architecture dracula of CURRENT_HANDLER is
 
     signal STATE        : STATE_TYPE;
     signal WRITE_PTR    : unsigned(9 downto 0);
-    signal IS_FINAL_CH  : std_logic;
 
     signal FMAC_CLR_REG  : std_logic;
 
@@ -61,7 +60,6 @@ begin
                 BRAM_WEA           <= '0';
                 BRAM_ADDRA         <= (others => '0');
                 BRAM_DIA           <= (others => '0');
-                IS_FINAL_CH        <= '0';
 
             ELSE
                 CASE STATE IS
