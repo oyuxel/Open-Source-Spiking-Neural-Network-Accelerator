@@ -3,6 +3,7 @@ use IEEE.STD_LOGIC_1164.ALL;
 
 package processor_utils is
 function FindMax (val1 : integer;val2 : integer;val3 : integer)return integer;
+function clogb2( depth : natural) return integer;
 
 type SYNAPTICMEMDATA is array (natural range <>) of std_logic_vector(15 downto 0);
 type SYNAPTICMEMADDR is array (natural range <>) of std_logic_vector(31 downto 0);
@@ -38,5 +39,16 @@ begin
         return val3;
     end if;
 end function FindMax;
+
+function clogb2( depth : natural) return integer is
+variable temp    : integer := depth;
+variable ret_val : integer := 0;
+begin
+    while temp > 1 loop
+        ret_val := ret_val + 1;
+        temp    := temp / 2;
+    end loop;
+    return ret_val;
+end function clogb2;
 
 end package body processor_utils;
