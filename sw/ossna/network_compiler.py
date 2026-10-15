@@ -1,5 +1,3 @@
-# ossna/network_compiler.py
-
 import os
 import math
 import numpy as np
@@ -15,11 +13,10 @@ OP_SYNLOW          = 0x2
 OP_SYNHIGH         = 0x3
 OP_PFLOWRFPLST     = 0x4
 OP_NPADDRDATA      = 0x5
-OP_ULEARNPARAMS    = 0x6
-OP_TABLELOW        = 0x7
-OP_ULEARNLOWSYN    = 0x8
-OP_ULEARNHIGHSYN   = 0x9
-OP_ENDFLOW         = 0xA
+OP_ULEARNCFGLOW    = 0x6
+OP_ULEARNLOWSYN    = 0x7
+OP_ULEARNHIGHSYN   = 0x8
+OP_ENDFLOW         = 0xF
 
 ENDFLOW_NEXT_NEURON   = 1 << 0
 ENDFLOW_BARRIER_SYNC  = 1 << 1
@@ -125,17 +122,18 @@ class CompiledNetwork:
 
 
 class NetworkCompiler:
-    def __init__(self, network: Network, hw_info):
+    def __init__(self, network: Network, hw_info, global_dt: float = 1.0):
         self.network = network
         
-        if hasattr(hw_info, "hw_info"):
-            hw_info = hw_info.hw_info
+        self.network = network
+        self.hw_info = hw_info.hw_info if hasattr(hw_info, "hw_info") else hw_info
+        self.global_dt = global_dt 
             
         self.hw_info = hw_info
         self.num_cols = hw_info["crossbar_col"]
         self.syn_depth_per_col = hw_info["total_synapse_mem_words"] // self.num_cols
         self.param_depth_per_col = hw_info["total_param_mem_words"] // self.num_cols
-        self.lut_depth = hw_info["learning_engine_lut_depth"]
+        self.lut_depth = hw_info.get("learning_engine_lut_depth", 2048)
 
         self.syn_addr_mask = (1 << ((self.syn_depth_per_col - 1).bit_length())) - 1
         self.lut_addr_mask = (1 << ((self.lut_depth - 1).bit_length())) - 1
@@ -155,6 +153,7 @@ class NetworkCompiler:
         
         for layer in self.network.layers:
             m = layer.neuron_model
+            m.dt = self.global_dt
             m_id = id(m)
             if m_id not in [x["id"] for x in unique_models]:
                 dry_comp = NMCCompiler(m)
@@ -182,17 +181,16 @@ class NetworkCompiler:
         artifact.shared_inputs_start = shared_inputs_start
         artifact.shared_inputs_end = shared_inputs_end
 
-        print(f"  * Total Program Words      : {total_prog_words} words (M(0) to M({max(0, total_prog_words - 1)}))")
+        print(f"  * Total Program Words      : {total_prog_words} words")
         print(f"  * Max Input Pins           : {max_inputs} pins")
         print(f"  * XNEVER_BASE              : {xnever_base}")
-        print(f"  * Shared Inputs Zone       : M({shared_inputs_start}) to M({shared_inputs_end - 1})")
 
         nmc_bram_image = np.zeros(1024, dtype=np.uint16)
         artifact.verbose_nmc_memory_map = [f"ADDR {i:<4} | HEX: 0000 | (Empty)" for i in range(1024)]
         
         for i in range(max_inputs):
             in_addr = shared_inputs_start + i
-            artifact.verbose_nmc_memory_map[in_addr] = f"ADDR {in_addr:<4} | HEX: 0000 | [SHARED INPUT {i}] (Current Handler)"
+            artifact.verbose_nmc_memory_map[in_addr] = f"ADDR {in_addr:<4} | HEX: 0000 | [SHARED INPUT {i}]"
 
         model_pflow_start = {}
         model_footprints = {}
@@ -214,7 +212,7 @@ class NetworkCompiler:
                 
             nmc_bram_image[current_prog_ptr : current_prog_ptr + len(bytecode)] = bytecode
             
-            artifact.verbose_nmc_asm.append(f"\n# --- Neuron Model (PFLOW Start: {pflow_start}, Base Offset: M({current_footprint_offset})) ---")
+            artifact.verbose_nmc_asm.append(f"\n# --- Neuron Model (PFLOW Start: {pflow_start}) ---")
             asm_lines = asm_code.split("\n")
             for i, (asm, bc) in enumerate(zip(asm_lines, bytecode)):
                 artifact.verbose_nmc_asm.append(f"ADDR {pflow_start + i:<4} | HEX: {bc:04X} | ASM: {asm}")
@@ -253,50 +251,89 @@ class NetworkCompiler:
                     recip_val = 1.0 / c_val if c_val != 0 else 0.0
                     fp16 = HalfPrecision2Bin(recip_val)
                     nmc_bram_image[r_addr] = fp16
-                    artifact.verbose_nmc_memory_map[r_addr] = f"ADDR {r_addr:<4} | HEX: {fp16:04X} | [CONSTANT] {r_name} = {recip_val:.6f}"
+                    artifact.verbose_nmc_memory_map[r_addr] = f"ADDR {r_addr:<4} | HEX: {fp16:04X} | [CONSTANT] {r_name}"
 
             for p_name in nmc_comp.param_names:
                 if p_name in nmc_comp.memory_map:
                     p_addr = nmc_comp.memory_map[p_name]
-                    artifact.verbose_nmc_memory_map[p_addr] = f"ADDR {p_addr:<4} | HEX: 0000 | [DYNAMIC PARAM] {p_name} (Loaded by Bridge)"
+                    artifact.verbose_nmc_memory_map[p_addr] = f"ADDR {p_addr:<4} | HEX: 0000 | [DYNAMIC PARAM] {p_name}"
 
             current_footprint_offset = max(nmc_comp.memory_map.values()) + 1
 
-        artifact.slave_payloads[4] = nmc_bram_image
-        artifact.nmc_microcode = artifact.slave_payloads[4]
-
-        xnever_high = current_footprint_offset
-        artifact.xnever_high = xnever_high
-        artifact.register_config[Regs.ADDR_NMC_XNEVER] = (xnever_high << 16) | (xnever_base & 0x3FF)
-
-        print(f"  * XNEVER_HIGH              : {xnever_high}")
-        print(f"  * NMC BRAM Memory Usage    : {xnever_high}/1024 words used.")
-
-        print("\n[STAGE 2] Compiling STDP Plasticity Tables for Slave 5 (Learning LUT)...")
-        synapse_table_starts = {}
-        slave5_data = []
+        print("\n[STAGE 2] Compiling ULEARN VLIW & Plasticity Tables for Slave 5...")
+        slave5_data = np.zeros(self.lut_depth, dtype=np.uint8)
+        current_lut_ptr = 0
+        proj_learning_info = {}
+        processed_rules = {}
 
         for proj in self.network.projections:
             if proj.learning and proj.synapse_model is not None:
                 s_model = proj.synapse_model
-                table_key = (id(s_model), round(proj.q_factor, 6))
-                if table_key not in synapse_table_starts:
-                    syn_comp = SynapseCompiler(s_model)
-                    lut_array = syn_comp.compile(q_factor=proj.q_factor, enforce_zero_point=True)
-                    
-                    tbl_start = len(slave5_data)
-                    synapse_table_starts[table_key] = tbl_start
-                    slave5_data.extend(lut_array)
-                    
-                    artifact.verbose_lut.append(f"\n# --- STDP Model: {proj.name} (Q_syn={proj.q_factor:.6f}) ---")
-                    for i, val in enumerate(lut_array):
-                        phase = "LTP (Pre->Post)" if i < 128 else "LTD (Post->Pre)"
-                        int8_val = val if val < 128 else val - 256
-                        artifact.verbose_lut.append(f"ADDR {tbl_start + i:<4} | HEX: {val:02X} | Value: {int8_val:>4} | Phase: {phase}")
+                has_multiplication = '*' in s_model.update_rule
+                auto_shift = 8 if has_multiplication else 0
+                rule_key = (id(s_model), round(proj.q_factor, 6), round(proj.w_min, 6), round(proj.w_max, 6), auto_shift)
+                
+                if rule_key not in processed_rules:
+                    s_model.quant_factor = proj.q_factor
+                    s_model.wmin = proj.w_min
+                    s_model.wmax = proj.w_max
+                    s_model.out_shift = auto_shift
 
-        if len(slave5_data) > 0:
-            artifact.slave_payloads[5] = np.array(slave5_data, dtype=np.uint8)
-            artifact.stdp_lut = artifact.slave_payloads[5]
+                    s_model.correlation_step = self.global_dt
+
+                    syn_comp = SynapseCompiler(s_model)
+                    
+                    syn_comp = SynapseCompiler(s_model)
+                    lut_info = syn_comp.get_lut_array()
+                    addr_min, addr_max = lut_info["address_limits"]
+                    lut_size = addr_max - addr_min + 1
+                    
+                    if current_lut_ptr + lut_size > self.lut_depth:
+                        raise MemoryError("Slave 5 LUT BRAM capacity exceeded.")
+                        
+                    center_offset = current_lut_ptr - addr_min
+                    vliw_hex = syn_comp.compile_vliw(lut_center_addr=center_offset)
+                    
+                    lut_dict = lut_info["lut_data"]
+                    for offset in range(addr_min, addr_max + 1):
+                        bram_addr = center_offset + offset
+                        val = lut_dict.get(offset, 0)
+                        slave5_data[bram_addr] = val & 0xFF
+                        
+                    artifact.verbose_lut.append(f"\n# --- STDP Model: {proj.name} (Center Offset: {center_offset}) ---")
+                    for offset in range(addr_min, addr_max + 1):
+                        b_addr = center_offset + offset
+                        v = slave5_data[b_addr]
+                        int8_v = v if v < 128 else v - 256
+                        artifact.verbose_lut.append(f"ADDR {b_addr:<4} | HEX: {v:02X} | INT8: {int8_v:>4} | Offset: {offset}")
+                        
+                    current_lut_ptr += lut_size
+                    
+                    if current_footprint_offset + 16 > 1024:
+                        raise MemoryError("NMC BRAM Capacity exceeded while allocating VLIW words.")
+                        
+                    cfg_absolute_addr = current_footprint_offset
+                    vliw_val = int(vliw_hex, 16)
+                    
+                    artifact.verbose_nmc_memory_map[cfg_absolute_addr] = f"\n# --- VLIW CFG_WORD for {proj.name} ---"
+                    for i in range(16):
+                        chunk = (vliw_val >> (i * 16)) & 0xFFFF
+                        nmc_bram_image[cfg_absolute_addr + i] = chunk
+                        artifact.verbose_nmc_memory_map[cfg_absolute_addr + i] = f"ADDR {cfg_absolute_addr + i:<4} | HEX: {chunk:04X} | VLIW CHUNK [{i}]"
+                        
+                    current_footprint_offset += 16
+                    processed_rules[rule_key] = cfg_absolute_addr
+                    
+                proj_learning_info[proj.name] = processed_rules[rule_key]
+
+        artifact.slave_payloads[5] = slave5_data
+        artifact.stdp_lut = artifact.slave_payloads[5]
+        
+        xnever_high = current_footprint_offset
+        artifact.xnever_high = xnever_high
+        artifact.register_config[Regs.ADDR_NMC_XNEVER] = (xnever_high << 16) | (xnever_base & 0x3FF)
+        artifact.slave_payloads[4] = nmc_bram_image
+        artifact.nmc_microcode = artifact.slave_payloads[4]
 
         print("\n[STAGE 3] Generating Column Tiling & Multi-Channel Bridge Microcodes...")
         synapse_brams = [[] for _ in range(self.num_cols)]
@@ -319,16 +356,15 @@ class NetworkCompiler:
                     neuron_global_id = sum(l.size for l in self.network.layers[:layer_idx]) + neuron_in_layer
 
                     if neuron_in_layer < layer.size:
-                        artifact.verbose_neural[col].append(f"\n# --- Layer: {layer.name} | Neuron L-ID: {neuron_in_layer} (Global ID: {neuron_global_id}) ---")
+                        artifact.verbose_neural[col].append(f"\n# --- Layer: {layer.name} | Neuron L-ID: {neuron_in_layer} ---")
                         
-                        proj_syn_bounds = {}
-
-                        # 1. PFLOWRFPLST (Initial Refractory = 0)
                         cmd_pflow = (OP_PFLOWRFPLST << 28) | ((pflow_start & 0x3FF) << 16) | (0x00 << 8) | 0x7F
                         neural_brams[col].append(cmd_pflow)
-                        artifact.verbose_neural[col].append(f"HEX: {cmd_pflow:08X} | PFLOWRFPLST -> NMC Address: {pflow_start}, Ref: 0, LastSpk: 127")
+                        artifact.verbose_neural[col].append(f"HEX: {cmd_pflow:08X} | PFLOWRFPLST -> NMC Address: {pflow_start}")
 
-                        # 2. CHANNEL TRIADS (SSSDSYNQ, SYNLOW, SYNHIGH)
+                        ulearn_cmds_temp = []
+                        ulearn_verbose_temp = []
+
                         for pin_idx, pin_name in enumerate(layer.neuron_model.Inputs):
                             proj = layer.get_projection_for_pin(pin_name)
                             if proj is None:
@@ -341,14 +377,10 @@ class NetworkCompiler:
                             syn_high = syn_low + len(w_packed) - 1
                             synapse_brams[col].extend(w_packed.tolist())
                             syn_addr_ptrs[col] = syn_high + 1
-                            proj_syn_bounds[proj.name] = (syn_low, syn_high)
 
-                            artifact.verbose_synapses[col].append(
-                                f"\n# --- Layer: {layer.name} | Neuron: {neuron_in_layer} | Channel: {pin_name} (Projection: {proj.name}) ---"
-                            )
-                            artifact.verbose_synapses[col].append(f"# BRAM Address Range: [{syn_low} .. {syn_high}] | Synapse Count: {len(w_packed)}")
+                            artifact.verbose_synapses[col].append(f"\n# --- Layer: {layer.name} | Channel: {pin_name} ---")
                             for offset, w_val in enumerate(w_raw):
-                                artifact.verbose_synapses[col].append(f"ADDR {syn_low + offset:<4} | HEX: {w_packed[offset]:04X} | Weight: {w_val & 0xFF:<4} | Trace: 127")
+                                artifact.verbose_synapses[col].append(f"ADDR {syn_low + offset:<4} | HEX: {w_packed[offset]:04X}")
 
                             if proj.source == "input":
                                 src_main = 1 if p_idx == 0 else 0
@@ -375,54 +407,39 @@ class NetworkCompiler:
                             neural_brams[col].append(cmd_synlow)
                             neural_brams[col].append(cmd_synhigh)
 
-                            artifact.verbose_neural[col].append(f"HEX: {cmd_sssd:08X} | SSSDSYNQ (Pin: {pin_name}) -> Src_Main={src_main} Src_Circ={src_circ} Src_Aux={src_aux} | Dst_Out={dst_out} Dst_Aux={dst_aux} | Q_syn={proj.q_factor:.6f}")
-                            artifact.verbose_neural[col].append(f"HEX: {cmd_synlow:08X} | SYNLOW   (Pin: {pin_name}) -> Address: {syn_low}")
-                            artifact.verbose_neural[col].append(f"HEX: {cmd_synhigh:08X} | SYNHIGH  (Pin: {pin_name}) -> Address: {syn_high}")
+                            artifact.verbose_neural[col].append(f"HEX: {cmd_sssd:08X} | SSSDSYNQ (Pin: {pin_name})")
+                            artifact.verbose_neural[col].append(f"HEX: {cmd_synlow:08X} | SYNLOW   (Pin: {pin_name}) -> Addr: {syn_low}")
+                            artifact.verbose_neural[col].append(f"HEX: {cmd_synhigh:08X} | SYNHIGH  (Pin: {pin_name}) -> Addr: {syn_high}")
 
-                        # 3. NPADDRDATA PARAMETERS
+                            if proj.learning and proj.synapse_model is not None:
+                                cfg_addr = proj_learning_info[proj.name]
+                                
+                                cmd_cfg = (OP_ULEARNCFGLOW << 28) | (cfg_addr & 0x3FF)
+                                cmd_ulow = (OP_ULEARNLOWSYN << 28) | (syn_low & self.syn_addr_mask)
+                                cmd_uhigh = (OP_ULEARNHIGHSYN << 28) | (syn_high & self.syn_addr_mask)
+
+                                ulearn_cmds_temp.append(cmd_cfg)
+                                ulearn_cmds_temp.append(cmd_ulow)
+                                ulearn_cmds_temp.append(cmd_uhigh)
+
+                                ulearn_verbose_temp.append(f"HEX: {cmd_cfg:08X} | ULEARNCFGLOW (Pin: {pin_name}) -> CFG Addr: {cfg_addr}")
+                                ulearn_verbose_temp.append(f"HEX: {cmd_ulow:08X} | ULEARNLOWSYN (Pin: {pin_name}) -> Addr: {syn_low}")
+                                ulearn_verbose_temp.append(f"HEX: {cmd_uhigh:08X} | ULEARNHIGHSYN (Pin: {pin_name}) -> Addr: {syn_high}")
+
                         for p_name in footprint["param_names"]:
                             p_addr = footprint["memory_map"][p_name]
                             p_val  = footprint["param_values"].get(p_name, 0.0)
                             p_fp16 = HalfPrecision2Bin(p_val)
                             cmd_param = (OP_NPADDRDATA << 28) | ((p_addr & 0x3FF) << 16) | (p_fp16 & 0xFFFF)
                             neural_brams[col].append(cmd_param)
-                            artifact.verbose_neural[col].append(f"HEX: {cmd_param:08X} | NPADDRDATA -> M({p_addr}) = {p_val} ({p_name})")
+                            artifact.verbose_neural[col].append(f"HEX: {cmd_param:08X} | NPADDRDATA -> M({p_addr}) = {p_val}")
 
-                        # 4. STDP CODES
-                        has_any_learning = False
-                        for proj in layer.projections:
-                            if proj.learning and proj.synapse_model is not None:
-                                has_any_learning = True
-                                p_en = (1 << 17) if proj.pruning else 0
-                                z_ig = (1 << 16) if proj.ignore_zero_synapses else 0
-                                p_th = (int(proj.pruning_threshold) & 0xFF) << 8 if proj.pruning_threshold else 0
-                                lr_b = int(round(proj.learning_rate * 256)) & 0xFF
-                                cmd_lr = (OP_ULEARNPARAMS << 28) | p_en | z_ig | p_th | lr_b
-                                
-                                table_key = (id(proj.synapse_model), round(proj.q_factor, 6))
-                                tbl_start = synapse_table_starts[table_key]
-                                cmd_table = (OP_TABLELOW << 28) | (tbl_start & self.lut_addr_mask)
+                        if ulearn_cmds_temp:
+                            neural_brams[col].extend(ulearn_cmds_temp)
+                            artifact.verbose_neural[col].extend(ulearn_verbose_temp)
 
-                                syn_l, syn_h = proj_syn_bounds[proj.name]
-                                cmd_ulow = (OP_ULEARNLOWSYN << 28) | (syn_l & self.syn_addr_mask)
-                                cmd_uhigh = (OP_ULEARNHIGHSYN << 28) | (syn_h & self.syn_addr_mask)
-
-                                neural_brams[col].append(cmd_lr)
-                                neural_brams[col].append(cmd_table)
-                                neural_brams[col].append(cmd_ulow)
-                                neural_brams[col].append(cmd_uhigh)
-
-                                artifact.verbose_neural[col].append(f"HEX: {cmd_lr:08X} | ULEARNPARAMS (Pin: {proj.target_pin}) -> Prun={proj.pruning}, Ignore_Z={proj.ignore_zero_synapses}, LR={lr_b}/256")
-                                artifact.verbose_neural[col].append(f"HEX: {cmd_table:08X} | TABLELOW (Pin: {proj.target_pin}) -> Address: {tbl_start}")
-                                artifact.verbose_neural[col].append(f"HEX: {cmd_ulow:08X} | ULEARNLOWSYNADDR (Pin: {proj.target_pin}) -> Address: {syn_l}")
-                                artifact.verbose_neural[col].append(f"HEX: {cmd_uhigh:08X} | ULEARNHIGHSYNADDR (Pin: {proj.target_pin}) -> Address: {syn_h}")
-
-                        # =====================================================
-                        # 5. ENDFLOW 
-                        # =====================================================
                         end_flag = 0
-
-                        if has_any_learning:
+                        if any(p.learning for p in layer.projections):
                             end_flag |= ENDFLOW_LEARNING_EN
 
                         if is_last_layer and is_last_pass_of_layer:
@@ -432,14 +449,10 @@ class NetworkCompiler:
 
                         cmd_end = (OP_ENDFLOW << 28) | end_flag
                         neural_brams[col].append(cmd_end)
-                        artifact.verbose_neural[col].append(
-                            f"HEX: {cmd_end:08X} | ENDFLOW -> Flags: [Next={bool(end_flag & 1)}, Barrier=False, STDP={bool(end_flag & 4)}, Timestep={bool(end_flag & 8)}]"
-                        )
+                        artifact.verbose_neural[col].append(f"HEX: {cmd_end:08X} | ENDFLOW")
 
                     else:
-
                         dummy_flag = ENDFLOW_BARRIER_SYNC  
-
                         if is_last_layer and is_last_pass_of_layer:
                             dummy_flag |= ENDFLOW_TIMESTEP_UP 
                         else:
@@ -448,9 +461,7 @@ class NetworkCompiler:
                         cmd_dummy = (OP_ENDFLOW << 28) | dummy_flag
                         neural_brams[col].append(cmd_dummy)
                         artifact.verbose_neural[col].append(f"\n# --- Layer: {layer.name} | DUMMY/BARRIER ---")
-                        artifact.verbose_neural[col].append(
-                            f"HEX: {cmd_dummy:08X} | ENDFLOW -> DUMMY BARRIER [Next={bool(dummy_flag & 1)}, Barrier=True, Timestep={bool(dummy_flag & 8)}]"
-                        )
+                        artifact.verbose_neural[col].append(f"HEX: {cmd_dummy:08X} | ENDFLOW -> DUMMY BARRIER")
 
         neural_base = 6 + self.num_cols
         for c in range(self.num_cols):
