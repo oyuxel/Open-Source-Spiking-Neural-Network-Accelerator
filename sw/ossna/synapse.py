@@ -1,119 +1,380 @@
-# ossna/synapse.py
-
+import ast
+import re
 import math
 import numpy as np
-from typing import Optional
 
 class Synapse:
+    def __init__(self):
+        self.param_list = []
+        self.wmax = None
+        self.wmin = None
+        self.out_shift = 0
+        self.correlation_addressing = ""
+        self.correlation_term = ""
+        self.correlation_var = ""
+        self.correlation_step = None
+        self.quant_factor = None
+        self.correlation = ""
+        self.update_rule = ""
 
-    def __init__(self, on_pre: str = None, on_post: str = None,
-                 time_window_left: float = 50e-3, 
-                 time_window_right: float = 50e-3, 
-                 zero_point: float = 0.0, 
-                 samples: int = 256):
-        self.on_pre = on_pre if on_pre else "0.6*exp(t/50e-3)"
-        self.on_post = on_post if on_post else "-0.6*exp(-t/50e-3)"
-        self.time_window_left = time_window_left
-        self.time_window_right = time_window_right
-        self.zero_point = zero_point
-        self.samples = samples
+class _DSPMapper:
+    def __init__(self, w_ast_1, w_ast_2, param_list, quant_factor, corr_term):
+        self.w_ast_1 = w_ast_1
+        self.w_ast_2 = w_ast_2
+        self.params = param_list
+        self.qf = quant_factor
+        self.corr_term = corr_term
 
+        self.constants = {
+            "C1": self._quantize(self.params.get("wmax", 0)),
+            "C2": self._quantize(self.params.get("wmin", 0)),
+            "C3": 0,
+            "C4": 0
+        }
+        self.constants["C1"] = max(-128, min(127, self.constants["C1"])) & 0xFFFF
+        self.constants["C2"] = max(-128, min(127, self.constants["C2"])) & 0xFFFF
+
+        self.mux_config = {
+            "DSP1": {"D": "000", "C": "00", "B": "00", "A": "000"},
+            "DSP2": {"D": "000", "C": "00", "B": "00", "A": "000"},
+            "DSP3": {"D": "000", "C": "00", "B": "00", "A": "000"},
+            "DSP4": {"D": "000", "C": "00", "B": "00", "A": "000"}
+        }
+
+        self.ctrl_config = {
+            "DSP1": {"ALU": "0000", "IN": "01100", "OP": "0110101"},
+            "DSP2": {"ALU": "0000", "IN": "00000", "OP": "0010101"},
+            "DSP3": {"ALU": "0000", "IN": "01100", "OP": "0110101"},
+            "DSP4": {"ALU": "0000", "IN": "00000", "OP": "0010101"}
+        }
+
+    def map_to_hardware(self):
+        if self.w_ast_1:
+            self._analyze_branch_ast(self.w_ast_1, "DSP1", "DSP2", "YOL_1")
+        if self.w_ast_2:
+            self._analyze_branch_ast(self.w_ast_2, "DSP3", "DSP4", "YOL_2")
+
+    def _analyze_branch_ast(self, root_node, dsp_lut, dsp_lin, branch_type):
+        terms = self._split_into_terms(root_node)
+        for term_node, sign in terms:
+            term_str = ast.unparse(term_node).strip()
+            if term_str == 'w':
+                self.mux_config[dsp_lut]["C"] = "01"
+            elif self._contains_var(term_node, self.corr_term):
+                self.mux_config[dsp_lut]["B"] = "10"
+                if sign == '-':
+                    self.ctrl_config[dsp_lut]["ALU"] = "0011"
+                if self._contains_var(term_node, 'wmax'):
+                    self.mux_config[dsp_lut]["D"] = "011"
+                    self.mux_config[dsp_lut]["A"] = "010"
+                elif self._contains_var(term_node, 'wmin'):
+                    self.mux_config[dsp_lut]["D"] = "010"
+                    self.mux_config[dsp_lut]["A"] = "100"
+                elif self._contains_var(term_node, 'w'):
+                    self.mux_config[dsp_lut]["D"] = "000"
+                    self.mux_config[dsp_lut]["A"] = "010"
+                    if sign == '+': self.ctrl_config[dsp_lut]["ALU"] = "0011"
+                    else: self.ctrl_config[dsp_lut]["ALU"] = "0000"
+                else:
+                    self.mux_config[dsp_lut]["D"] = "000"
+                    self.mux_config[dsp_lut]["A"] = "001"
+                    self.ctrl_config[dsp_lut]["IN"] = "00000"
+            elif isinstance(term_node, ast.BinOp) and isinstance(term_node.op, ast.Mult):
+                left = ast.unparse(term_node.left).strip()
+                right = ast.unparse(term_node.right).strip()
+                const_name = left if right == 'w' else right
+                val = self.params.get(const_name, 0.0)
+                q_val = self._quantize(val)
+                if branch_type == "YOL_1":
+                    self.constants["C3"] = q_val
+                    self.mux_config[dsp_lin]["B"] = "11"
+                else:
+                    self.constants["C4"] = q_val
+                    self.mux_config[dsp_lin]["B"] = "11"
+                self.mux_config[dsp_lin]["D"] = "000"
+                self.mux_config[dsp_lin]["A"] = "010"
+                if sign == '+': self.ctrl_config[dsp_lin]["ALU"] = "0011"
+                else: self.ctrl_config[dsp_lin]["ALU"] = "0000"
+            elif isinstance(term_node, ast.Name) and term_node.id in self.params:
+                const_name = term_node.id
+                val = self.params.get(const_name, 0.0)
+                q_val = self._quantize(val)
+                if branch_type == "YOL_1":
+                    self.constants["C3"] = q_val
+                    self.mux_config[dsp_lin]["C"] = "11"
+                else:
+                    self.constants["C4"] = q_val
+                    self.mux_config[dsp_lin]["C"] = "11"
+                self.ctrl_config[dsp_lin]["OP"] = "0010111"
+                if sign == '-': self.ctrl_config[dsp_lin]["ALU"] = "0011"
+
+    def _split_into_terms(self, node):
+        terms = []
+        def _traverse(n, current_sign):
+            if isinstance(n, ast.BinOp):
+                if isinstance(n.op, ast.Add):
+                    _traverse(n.left, current_sign)
+                    _traverse(n.right, "+")
+                elif isinstance(n.op, ast.Sub):
+                    _traverse(n.left, current_sign)
+                    _traverse(n.right, "-")
+                else:
+                    terms.append((n, current_sign))
+            else:
+                terms.append((n, current_sign))
+        _traverse(node, "+")
+        return terms
+
+    def _contains_var(self, node, var_name):
+        for sub_node in ast.walk(node):
+            if isinstance(sub_node, ast.Name) and sub_node.id == var_name:
+                return True
+        return False
+
+    def _quantize(self, value):
+        q = int(np.round(value / self.qf))
+        if q > 32767: q = 32767
+        elif q < -32768: q = -32768
+        return q & 0xFFFF
 
 class SynapseCompiler:
-
     def __init__(self, synapse: Synapse):
-        self.synapse = synapse
-        self.lut_table = None
-        self._natural_curve = None
-        self._time_axis = None
-        self.q_factor = None
+        self.syn = synapse
+        self.params = {}
+        self.lut = {}
+        self.addr_min = 0
+        self.addr_max = 0
+        self.lut_multiplier = 1.0
 
-    def _evaluate_expression(self, expr_str: str, t_values: np.ndarray) -> np.ndarray:
-        safe_dict = {
-            "t": t_values,
-            "exp": np.exp,
-            "sin": np.sin,
-            "cos": np.cos,
-            "abs": np.abs,
-            "pi": np.pi,
-            "e": np.e
+        self.vliw_config = {
+            "COND_1_SEL": "0101",
+            "COND_2_SEL": "0110",
+            "TRACE_1_OP": "000",
+            "TRACE_1_CONST": 0,
+            "TRACE_2_OP": "000",
+            "TRACE_2_CONST": 0,
+            "OUT_SHIFT": "00"
         }
+
+        self.w_ast_1 = None
+        self.w_ast_2 = None
+
+        self._check_update_rule()
+        self._parse_params()
+
+        if self.syn.wmax is None or self.syn.wmin is None:
+            raise ValueError("wmax and wmin attributes must be defined.")
+
+        if self.syn.out_shift == 4: self.vliw_config["OUT_SHIFT"] = "01"
+        elif self.syn.out_shift == 8: self.vliw_config["OUT_SHIFT"] = "10"
+        elif self.syn.out_shift == 12: self.vliw_config["OUT_SHIFT"] = "11"
+        else: self.vliw_config["OUT_SHIFT"] = "00"
+
+        self._parse_update_rule()
+        self._extract_lut_multiplier()
+
+        if self.syn.correlation:
+            self._check_correlation_requirements()
+            self._validate_correlation_ast()
+            self._calculate_addressing_limits()
+            self._generate_lut()
+
+    def _check_update_rule(self):
+        if not self.syn.update_rule or not self.syn.update_rule.strip():
+            raise ValueError("update_rule cannot be empty.")
+
+    def _parse_params(self):
+        self.params["wmax"] = float(self.syn.wmax)
+        self.params["wmin"] = float(self.syn.wmin)
+        for param_str in self.syn.param_list:
+            if "=" not in param_str:
+                raise ValueError(f"Parameter '{param_str}' must contain '='.")
+            key, val = param_str.split("=", 1)
+            self.params[key.strip()] = float(val.strip())
+
+    def _check_correlation_requirements(self):
+        if not self.syn.correlation_step:
+            raise ValueError("correlation_step is missing.")
+        if not self.syn.correlation_var:
+            raise ValueError("correlation_var is missing.")
+        if not self.syn.correlation_term:
+            raise ValueError("correlation_term is missing.")
+        if not self.syn.quant_factor:
+            raise ValueError("quant_factor is missing.")
+
+    def _validate_correlation_ast(self):
         try:
-            result = eval(expr_str, {"__builtins__": None}, safe_dict)
-            return np.array(result, dtype=np.float64)
-        except Exception as e:
-            raise ValueError(f"Synapse Formula Parsing Error: '{expr_str}' -> {e}")
+            tree = ast.parse(self.syn.correlation)
+        except SyntaxError as e:
+            raise SyntaxError(f"Syntax error in correlation block: {e}")
+        allowed_names = set(self.params.keys()).union({
+            self.syn.correlation_var,
+            self.syn.correlation_term,
+            'exp', 'log', 'sin', 'cos', 'sqrt', 'abs', 'math', 'np'
+        })
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                if node.id not in allowed_names:
+                    raise NameError(f"Undefined variable '{node.id}' found in correlation.")
 
-    def compile(self, q_factor: Optional[float] = None, enforce_zero_point: bool = True) -> np.ndarray:
+    def _parse_update_rule(self):
+        tree = ast.parse(self.syn.update_rule)
+        has_if = False
+        for node in tree.body:
+            if isinstance(node, ast.If):
+                has_if = True
+                break
+        if not has_if:
+            self.vliw_config["COND_1_SEL"] = "0101"
+            self.vliw_config["COND_2_SEL"] = "0110"
+            self._parse_branch(tree.body, 1)
+            return
 
-        half_samples = self.synapse.samples // 2  # 128 LTP, 128 LTD
+        if len(tree.body) > 1:
+            raise SyntaxError("Only a single 'if' root block is allowed.")
 
-        self.q_factor = float(q_factor) if q_factor is not None else (2.0 / 256.0)
+        if_node = tree.body[0]
+        self.vliw_config["COND_1_SEL"] = self._get_cond_code(if_node.test)
+        self._parse_branch(if_node.body, 1)
 
-        lhs_time = np.linspace(-self.synapse.time_window_left, self.synapse.zero_point, half_samples)
-        rhs_time = np.linspace(self.synapse.zero_point, self.synapse.time_window_right, half_samples)
+        if not if_node.orelse:
+            self.vliw_config["COND_2_SEL"] = "0110"
+            return
 
-        lhs_vals = self._evaluate_expression(self.synapse.on_pre, lhs_time)
-        rhs_vals = self._evaluate_expression(self.synapse.on_post, rhs_time)
+        if isinstance(if_node.orelse[0], ast.If):
+            if len(if_node.orelse) > 1 or if_node.orelse[0].orelse:
+                raise SyntaxError("Only 'if-else' or 'if-elif' are supported.")
+            elif_node = if_node.orelse[0]
+            self.vliw_config["COND_2_SEL"] = self._get_cond_code(elif_node.test)
+            self._parse_branch(elif_node.body, 2)
+        else:
+            if self.vliw_config["COND_1_SEL"] == "0000": self.vliw_config["COND_2_SEL"] = "0010"
+            elif self.vliw_config["COND_1_SEL"] == "0010": self.vliw_config["COND_2_SEL"] = "0000"
+            else: self.vliw_config["COND_2_SEL"] = "0101"
+            self._parse_branch(if_node.orelse, 2)
 
-        lhs_int8 = np.clip(np.round(lhs_vals / self.q_factor), -128, 127).astype(np.int8)
-        rhs_int8 = np.clip(np.round(rhs_vals / self.q_factor), -128, 127).astype(np.int8)
+    def _get_cond_code(self, test_node):
+        if isinstance(test_node, ast.Compare):
+            left = test_node.left.id
+            op = type(test_node.ops[0])
+            right = test_node.comparators[0].value
+            if left == "dt" and op == ast.Gt and right == 0: return "0000"
+            if left == "dt" and op == ast.Eq and right == 0: return "0001"
+            if left == "dt" and op == ast.Lt and right == 0: return "0010"
+            if left == "trace_pre" and op == ast.Eq and right == 0: return "0011"
+            if left == "trace_post" and op == ast.Eq and right == 0: return "0100"
+        raise SyntaxError("Unsupported hardware condition syntax.")
 
-        bram_ltp = np.flip(lhs_int8)
-        bram_ltd = np.copy(rhs_int8)
+    def _parse_branch(self, body_nodes, path_num):
+        prefix = "TRACE_1" if path_num == 1 else "TRACE_2"
+        for node in body_nodes:
+            if isinstance(node, ast.Assign):
+                target = node.targets[0].id
+                if target == "trace_post":
+                    raise SyntaxError("trace_post is strictly read-only.")
+                if target == "w":
+                    if path_num == 1: self.w_ast_1 = node.value
+                    else: self.w_ast_2 = node.value
+                elif target == "trace_pre":
+                    if isinstance(node.value, ast.Constant):
+                        self.vliw_config[f"{prefix}_OP"] = "011" if node.value.value == 0 else "100"
+                    elif isinstance(node.value, ast.BinOp):
+                        op = type(node.value.op)
+                        const_val = node.value.right.value
+                        self.vliw_config[f"{prefix}_OP"] = "001" if op == ast.Add else "010"
+                        self.vliw_config[f"{prefix}_CONST"] = const_val
 
-        if enforce_zero_point:
-            bram_ltp[0] = 0
-            bram_ltd[0] = 0
+    def _extract_lut_multiplier(self):
+        def _get_factors(n):
+            if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Mult):
+                return _get_factors(n.left) + _get_factors(n.right)
+            return [n]
+        mapper = _DSPMapper(self.w_ast_1, self.w_ast_2, self.params, 1, self.syn.correlation_term)
+        for ast_tree in [self.w_ast_1, self.w_ast_2]:
+            if not ast_tree: continue
+            terms = mapper._split_into_terms(ast_tree)
+            for term, sign in terms:
+                if mapper._contains_var(term, self.syn.correlation_term):
+                    factors = _get_factors(term)
+                    mult = 1.0
+                    for f in factors:
+                        f_str = ast.unparse(f).strip()
+                        if f_str == self.syn.correlation_term: continue
+                        if mapper._contains_var(f, 'w'): continue
+                        if f_str in self.params:
+                            mult *= self.params[f_str]
+                        else:
+                            try: mult *= float(f_str)
+                            except: pass
+                    self.lut_multiplier = mult
+                    return
 
-        plot_lhs = np.flip(bram_ltp)
-        plot_rhs = np.copy(bram_ltd)
-        self._time_axis = np.concatenate((lhs_time * 1e3, rhs_time * 1e3))
-        self._natural_curve = np.concatenate((plot_lhs, plot_rhs))
+    def _calculate_addressing_limits(self):
+        expr = self.syn.correlation_addressing.replace(" ", "")
+        tokens = re.findall(r'([+-]?)(w|trace_pre|trace_post)', expr)
+        limits = {'w': (-128, 127), 'trace_pre': (0, 255), 'trace_post': (0, 255)}
+        for sign, var in tokens:
+            vmin, vmax = limits[var]
+            if sign == '-':
+                self.addr_min -= vmax
+                self.addr_max -= vmin
+            else:
+                self.addr_min += vmin
+                self.addr_max += vmax
 
-        bram_ordered = np.concatenate((bram_ltp, bram_ltd))
-        self.lut_table = bram_ordered.astype(np.uint8)
+    def _generate_lut(self):
+        func_code = f"import math\nimport numpy as np\ndef _compute({self.syn.correlation_var}, {', '.join(self.params.keys())}):\n"
+        for line in self.syn.correlation.strip().split('\n'):
+            func_code += f"    {line}\n"
+        func_code += f"    return {self.syn.correlation_term}\n"
+        local_env = {}
+        exec(func_code, globals(), local_env)
+        compute_func = local_env['_compute']
+        for i in range(self.addr_min, self.addr_max + 1):
+            val_in = i * self.syn.correlation_step
+            res = compute_func(val_in, **self.params)
+            folded_res = res * self.lut_multiplier
+            quantized_val = int(np.round(folded_res / self.syn.quant_factor))
+            if quantized_val > 127: quantized_val = 127
+            elif quantized_val < -128: quantized_val = -128
+            self.lut[i] = quantized_val
 
-        min_coeff = int(bram_ordered.astype(np.int8).min())
-        max_coeff = int(bram_ordered.astype(np.int8).max())
-        print(f"[SYNAPSE COMPILER] STDP LUT Compiled with Q_syn = {self.q_factor:.6f}:")
-        print(f"  * Dynamic INT8 Range : Min = {min_coeff}, Max = {max_coeff}")
-        print(f"  * Zero-Point (Δt=0)  : BRAM[0] = {bram_ordered[0]} (LTP=0), BRAM[128] = {bram_ordered[128]} (LTD=0)")
-        print(f"  * Address Layout     : 128 LTP (Addr 0..127) + 128 LTD (Addr 128..255)")
+    def compile_vliw(self, lut_center_addr=0):
+        mapper = _DSPMapper(self.w_ast_1, self.w_ast_2, self.params, self.syn.quant_factor, self.syn.correlation_term)
+        mapper.map_to_hardware()
+        lut_mode = "0000"
+        if self.syn.correlation_addressing == "trace_pre": lut_mode = "0001"
+        elif self.syn.correlation_addressing == "w": lut_mode = "0010"
+        vliw_list = list("0" * 256)
+        def set_bits(high, low, val_bin):
+            val_bin = val_bin.zfill(high - low + 1)
+            vliw_list[255 - high : 255 - low + 1] = list(val_bin)
+        for i, dsp in enumerate(["DSP1", "DSP2", "DSP3", "DSP4"]):
+            base = i * 16
+            ctrl = mapper.ctrl_config[dsp]
+            set_bits(base + 15, base, ctrl["ALU"] + ctrl["IN"] + ctrl["OP"])
+            m_base = 64 + (i * 10)
+            mux = mapper.mux_config[dsp]
+            set_bits(m_base + 9, m_base, mux["D"] + mux["C"] + mux["B"] + mux["A"])
+        set_bits(143, 128, format(mapper.constants["C1"], '016b'))
+        set_bits(159, 144, format(mapper.constants["C2"], '016b'))
+        set_bits(175, 160, format(mapper.constants["C3"], '016b'))
+        set_bits(191, 176, format(mapper.constants["C4"], '016b'))
+        set_bits(194, 192, self.vliw_config["TRACE_1_OP"])
+        set_bits(202, 195, format(self.vliw_config["TRACE_1_CONST"], '08b'))
+        set_bits(205, 203, self.vliw_config["TRACE_2_OP"])
+        set_bits(213, 206, format(self.vliw_config["TRACE_2_CONST"], '08b'))
+        set_bits(229, 214, format(lut_center_addr, '016b'))
+        set_bits(233, 230, lut_mode)
+        set_bits(237, 234, self.vliw_config["COND_1_SEL"])
+        set_bits(241, 238, self.vliw_config["COND_2_SEL"])
+        set_bits(243, 242, self.vliw_config["OUT_SHIFT"])
+        return "0x" + hex(int("".join(vliw_list), 2))[2:].zfill(64).upper()
 
-        return self.lut_table
-
-    def plot(self):
-        try:
-            import matplotlib.pyplot as plt
-            if self.lut_table is None:
-                self.compile()
-
-            bram_int8 = self.lut_table.astype(np.int8)
-            addresses = np.arange(256)
-
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
-
-            ax1.plot(self._time_axis, self._natural_curve, 'b.-', label="STDP Response")
-            ax1.axvline(0, color='k', linestyle='--', alpha=0.7)
-            ax1.axhline(0, color='k', linestyle='--', alpha=0.7)
-            ax1.grid(True)
-            ax1.set_xlabel(r"$\Delta t = t_{post} - t_{pre}$ (ms)")
-            ax1.set_ylabel("Weight Change ($\Delta w$) [INT8]")
-            ax1.set_title(f"1. Physical Time-Domain Window (Q_syn={self.q_factor:.4f})\n(Zero update at Δt=0 enforced)")
-            ax1.legend()
-
-            ax2.plot(addresses[:128], bram_int8[:128], 'g.-', label="LTP Region (Addr 0..127)")
-            ax2.plot(addresses[128:], bram_int8[128:], 'r.-', label="LTD Region (Addr 128..255)")
-            ax2.axvline(127.5, color='k', linestyle='--', alpha=0.8, label="LTP / LTD Boundary")
-            ax2.axhline(0, color='k', linestyle='--', alpha=0.5)
-            ax2.grid(True)
-            ax2.set_xlabel("BRAM LUT Address (0 to 255)")
-            ax2.set_ylabel("Stored Coefficient [INT8]")
-            ax2.set_title(f"2. Hardware BRAM Address Space (Slave 5 LUT)\nBRAM[0]=0, BRAM[128]=0")
-            ax2.legend()
-
-            plt.tight_layout()
-            plt.show()
-        except ImportError:
-            print("Matplotlib not found.")
+    def get_lut_array(self):
+        return {
+            "address_limits": (self.addr_min, self.addr_max),
+            "quant_factor": self.syn.quant_factor,
+            "folded_multiplier": self.lut_multiplier,
+            "lut_data": self.lut
+        }
