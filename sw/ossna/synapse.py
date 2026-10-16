@@ -8,7 +8,6 @@ class Synapse:
         self.param_list = []
         self.wmax = None
         self.wmin = None
-        self.out_shift = 0
         self.correlation_addressing = ""
         self.correlation_term = ""
         self.correlation_var = ""
@@ -16,6 +15,7 @@ class Synapse:
         self.quant_factor = None
         self.correlation = ""
         self.update_rule = ""
+        self.out_shift = 0  
 
 class _DSPMapper:
     def __init__(self, w_ast_1, w_ast_2, param_list, quant_factor, corr_term):
@@ -25,27 +25,31 @@ class _DSPMapper:
         self.qf = quant_factor
         self.corr_term = corr_term
 
+        c1_int = int(np.round(self.params.get("wmax", 0) / self.qf))
+        c2_int = int(np.round(self.params.get("wmin", 0) / self.qf))
+
+        c1_int = max(-128, min(127, c1_int))
+        c2_int = max(-128, min(127, c2_int))
+
         self.constants = {
-            "C1": self._quantize(self.params.get("wmax", 0)),
-            "C2": self._quantize(self.params.get("wmin", 0)),
+            "C1": c1_int & 0xFFFF,
+            "C2": c2_int & 0xFFFF,
             "C3": 0,
             "C4": 0
         }
-        self.constants["C1"] = max(-128, min(127, self.constants["C1"])) & 0xFFFF
-        self.constants["C2"] = max(-128, min(127, self.constants["C2"])) & 0xFFFF
 
         self.mux_config = {
-            "DSP1": {"D": "000", "C": "00", "B": "00", "A": "000"},
-            "DSP2": {"D": "000", "C": "00", "B": "00", "A": "000"},
-            "DSP3": {"D": "000", "C": "00", "B": "00", "A": "000"},
-            "DSP4": {"D": "000", "C": "00", "B": "00", "A": "000"}
+            "DSP1": {"D": "00", "C": "00", "B": "00", "A": "00"},
+            "DSP2": {"D": "00", "C": "00", "B": "00", "A": "00"},
+            "DSP3": {"D": "00", "C": "00", "B": "00", "A": "00"},
+            "DSP4": {"D": "00", "C": "00", "B": "00", "A": "00"}
         }
 
         self.ctrl_config = {
-            "DSP1": {"ALU": "0000", "IN": "01100", "OP": "0110101"},
-            "DSP2": {"ALU": "0000", "IN": "00000", "OP": "0010101"},
-            "DSP3": {"ALU": "0000", "IN": "01100", "OP": "0110101"},
-            "DSP4": {"ALU": "0000", "IN": "00000", "OP": "0010101"}
+            "DSP1": {"ALU": "0000", "IN": "00000", "OP": "0110101"},
+            "DSP2": {"ALU": "0000", "IN": "00000", "OP": "0010000"}, 
+            "DSP3": {"ALU": "0000", "IN": "00000", "OP": "0110101"},
+            "DSP4": {"ALU": "0000", "IN": "00000", "OP": "0010000"} 
         }
 
     def map_to_hardware(self):
@@ -58,55 +62,62 @@ class _DSPMapper:
         terms = self._split_into_terms(root_node)
         for term_node, sign in terms:
             term_str = ast.unparse(term_node).strip()
+
             if term_str == 'w':
                 self.mux_config[dsp_lut]["C"] = "01"
+
             elif self._contains_var(term_node, self.corr_term):
                 self.mux_config[dsp_lut]["B"] = "10"
-                if sign == '-':
-                    self.ctrl_config[dsp_lut]["ALU"] = "0011"
+                if sign == '-': self.ctrl_config[dsp_lut]["ALU"] = "0011"
+
                 if self._contains_var(term_node, 'wmax'):
-                    self.mux_config[dsp_lut]["D"] = "011"
-                    self.mux_config[dsp_lut]["A"] = "010"
+                    self.mux_config[dsp_lut]["D"] = "10"
+                    self.mux_config[dsp_lut]["A"] = "01"
+                    self.ctrl_config[dsp_lut]["IN"] = "01100"
+                    self.ctrl_config[dsp_lut]["OP"] = "0110101"
                 elif self._contains_var(term_node, 'wmin'):
-                    self.mux_config[dsp_lut]["D"] = "010"
-                    self.mux_config[dsp_lut]["A"] = "100"
+                    self.mux_config[dsp_lut]["D"] = "01"
+                    self.mux_config[dsp_lut]["A"] = "11"
+                    self.ctrl_config[dsp_lut]["IN"] = "01100"
+                    self.ctrl_config[dsp_lut]["OP"] = "0110101"
                 elif self._contains_var(term_node, 'w'):
-                    self.mux_config[dsp_lut]["D"] = "000"
-                    self.mux_config[dsp_lut]["A"] = "010"
-                    if sign == '+': self.ctrl_config[dsp_lut]["ALU"] = "0011"
-                    else: self.ctrl_config[dsp_lut]["ALU"] = "0000"
-                else:
-                    self.mux_config[dsp_lut]["D"] = "000"
-                    self.mux_config[dsp_lut]["A"] = "001"
+                    self.mux_config[dsp_lut]["A"] = "01"
+                    self.mux_config[dsp_lut]["D"] = "00"
                     self.ctrl_config[dsp_lut]["IN"] = "00000"
-            elif isinstance(term_node, ast.BinOp) and isinstance(term_node.op, ast.Mult):
-                left = ast.unparse(term_node.left).strip()
-                right = ast.unparse(term_node.right).strip()
-                const_name = left if right == 'w' else right
-                val = self.params.get(const_name, 0.0)
-                q_val = self._quantize(val)
-                if branch_type == "YOL_1":
-                    self.constants["C3"] = q_val
-                    self.mux_config[dsp_lin]["B"] = "11"
+                    self.ctrl_config[dsp_lut]["OP"] = "0110101"
                 else:
-                    self.constants["C4"] = q_val
-                    self.mux_config[dsp_lin]["B"] = "11"
-                self.mux_config[dsp_lin]["D"] = "000"
-                self.mux_config[dsp_lin]["A"] = "010"
-                if sign == '+': self.ctrl_config[dsp_lin]["ALU"] = "0011"
-                else: self.ctrl_config[dsp_lin]["ALU"] = "0000"
-            elif isinstance(term_node, ast.Name) and term_node.id in self.params:
-                const_name = term_node.id
-                val = self.params.get(const_name, 0.0)
-                q_val = self._quantize(val)
-                if branch_type == "YOL_1":
-                    self.constants["C3"] = q_val
-                    self.mux_config[dsp_lin]["C"] = "11"
-                else:
-                    self.constants["C4"] = q_val
-                    self.mux_config[dsp_lin]["C"] = "11"
-                self.ctrl_config[dsp_lin]["OP"] = "0010111"
+                    self.mux_config[dsp_lut]["A"] = "00" 
+                    self.mux_config[dsp_lut]["D"] = "00" 
+                    self.ctrl_config[dsp_lut]["IN"] = "00000" 
+                    self.ctrl_config[dsp_lut]["OP"] = "0110101" 
+
+            else:
                 if sign == '-': self.ctrl_config[dsp_lin]["ALU"] = "0011"
+
+                if isinstance(term_node, ast.BinOp) and isinstance(term_node.op, ast.Mult):
+                    left = ast.unparse(term_node.left).strip()
+                    right = ast.unparse(term_node.right).strip()
+                    const_name = left if right == 'w' else right
+                    val = self.params.get(const_name, 0.0)
+
+                    c_reg = "C3" if branch_type == "YOL_1" else "C4"
+                    self.constants[c_reg] = self._quantize(val)
+                    self.mux_config[dsp_lin]["B"] = "11"
+                    self.mux_config[dsp_lin]["A"] = "01" 
+                    self.mux_config[dsp_lin]["D"] = "00"
+                    self.ctrl_config[dsp_lin]["IN"] = "00000"
+                    self.ctrl_config[dsp_lin]["OP"] = "0010101"
+
+                elif term_str in self.params:
+                    val = self.params.get(term_str, 0.0)
+
+                    c_reg = "C3" if branch_type == "YOL_1" else "C4"
+                    self.constants[c_reg] = self._quantize(val)
+                    self.mux_config[dsp_lin]["B"] = "11"
+                    self.mux_config[dsp_lin]["A"] = "00" 
+                    self.mux_config[dsp_lin]["D"] = "00" 
+                    self.ctrl_config[dsp_lin]["IN"] = "00000"
+                    self.ctrl_config[dsp_lin]["OP"] = "0010101"
 
     def _split_into_terms(self, node):
         terms = []
@@ -153,7 +164,7 @@ class SynapseCompiler:
             "TRACE_1_CONST": 0,
             "TRACE_2_OP": "000",
             "TRACE_2_CONST": 0,
-            "OUT_SHIFT": "00"
+            "OUT_SHIFT": format(self.syn.out_shift, '04b')
         }
 
         self.w_ast_1 = None
@@ -164,11 +175,6 @@ class SynapseCompiler:
 
         if self.syn.wmax is None or self.syn.wmin is None:
             raise ValueError("wmax and wmin attributes must be defined.")
-
-        if self.syn.out_shift == 4: self.vliw_config["OUT_SHIFT"] = "01"
-        elif self.syn.out_shift == 8: self.vliw_config["OUT_SHIFT"] = "10"
-        elif self.syn.out_shift == 12: self.vliw_config["OUT_SHIFT"] = "11"
-        else: self.vliw_config["OUT_SHIFT"] = "00"
 
         self._parse_update_rule()
         self._extract_lut_multiplier()
@@ -342,33 +348,45 @@ class SynapseCompiler:
     def compile_vliw(self, lut_center_addr=0):
         mapper = _DSPMapper(self.w_ast_1, self.w_ast_2, self.params, self.syn.quant_factor, self.syn.correlation_term)
         mapper.map_to_hardware()
-        lut_mode = "0000"
-        if self.syn.correlation_addressing == "trace_pre": lut_mode = "0001"
-        elif self.syn.correlation_addressing == "w": lut_mode = "0010"
+
+        lut_mode = "000"
+        if self.syn.correlation_addressing == "trace_post": lut_mode = "001"
+        elif self.syn.correlation_addressing == "trace_post - trace_pre": lut_mode = "010"
+        elif self.syn.correlation_addressing == "trace_pre - trace_post": lut_mode = "011"
+        elif self.syn.correlation_addressing == "w": lut_mode = "100"
+
         vliw_list = list("0" * 256)
+
         def set_bits(high, low, val_bin):
             val_bin = val_bin.zfill(high - low + 1)
-            vliw_list[255 - high : 255 - low + 1] = list(val_bin)
+            for offset, char in enumerate(reversed(val_bin)):
+                vliw_list[255 - (low + offset)] = char
+
         for i, dsp in enumerate(["DSP1", "DSP2", "DSP3", "DSP4"]):
             base = i * 16
             ctrl = mapper.ctrl_config[dsp]
             set_bits(base + 15, base, ctrl["ALU"] + ctrl["IN"] + ctrl["OP"])
-            m_base = 64 + (i * 10)
+            m_base = 64 + (i * 8)
             mux = mapper.mux_config[dsp]
-            set_bits(m_base + 9, m_base, mux["D"] + mux["C"] + mux["B"] + mux["A"])
+            set_bits(m_base + 7, m_base, mux["D"] + mux["C"] + mux["B"] + mux["A"])
+
         set_bits(143, 128, format(mapper.constants["C1"], '016b'))
         set_bits(159, 144, format(mapper.constants["C2"], '016b'))
         set_bits(175, 160, format(mapper.constants["C3"], '016b'))
         set_bits(191, 176, format(mapper.constants["C4"], '016b'))
+
         set_bits(194, 192, self.vliw_config["TRACE_1_OP"])
         set_bits(202, 195, format(self.vliw_config["TRACE_1_CONST"], '08b'))
         set_bits(205, 203, self.vliw_config["TRACE_2_OP"])
         set_bits(213, 206, format(self.vliw_config["TRACE_2_CONST"], '08b'))
+
         set_bits(229, 214, format(lut_center_addr, '016b'))
-        set_bits(233, 230, lut_mode)
-        set_bits(237, 234, self.vliw_config["COND_1_SEL"])
-        set_bits(241, 238, self.vliw_config["COND_2_SEL"])
-        set_bits(243, 242, self.vliw_config["OUT_SHIFT"])
+
+        set_bits(232, 230, lut_mode)
+        set_bits(236, 233, self.vliw_config["COND_1_SEL"])
+        set_bits(240, 237, self.vliw_config["COND_2_SEL"])
+        set_bits(244, 241, self.vliw_config["OUT_SHIFT"])
+
         return "0x" + hex(int("".join(vliw_list), 2))[2:].zfill(64).upper()
 
     def get_lut_array(self):
