@@ -1,11 +1,16 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use work.processor_utils.all;
 
 library UNISIM;
 use UNISIM.vcomponents.all;
 
 entity ULEARN is
+    Generic(
+            LUT_DEPTH          : integer := 1024;
+            SYNAPSE_MEM_DEPTH  : integer := 2048           
+            );
     Port 
     ( 
         CLK                    : in  std_logic;
@@ -13,15 +18,20 @@ entity ULEARN is
         CFG_WORD               : in  std_logic_vector(255 downto 0);
         NMODEL_SPIKE_TIME      : in  std_logic_vector(7 downto 0);  
         SYN_DATA_IN            : in  std_logic_vector(15 downto 0); 
-        SYN_DIN_VLD            : in  std_logic;                     
+        SYN_DIN_VLD            : in  std_logic;                    
+        SYNAPSE_START_ADDRESS  : in  std_logic_vector((clogb2(SYNAPSE_MEM_DEPTH)-1) downto 0);  
         SYN_DATA_OUT           : out std_logic_vector(15 downto 0);
         SYN_DOUT_VLD           : out std_logic;                     
-        LUT_ADDR               : out std_logic_vector(15 downto 0);
+        SYNAPSE_WRITE_ADDRESS  : out std_logic_vector((clogb2(SYNAPSE_MEM_DEPTH)-1) downto 0);
+        LUT_ADDR               : out std_logic_vector((clogb2(LUT_DEPTH)-1) downto 0);
         LUT_DOUT               : in  std_logic_vector(7 downto 0)  
     );
 end ULEARN;
 
 architecture rtl of ULEARN is
+
+    constant MEMWIDTH : integer := clogb2(SYNAPSE_MEM_DEPTH);
+    constant LUTWIDTH : integer := clogb2(LUT_DEPTH);
 
     signal DSP1_ALUMODE , DSP2_ALUMODE , DSP3_ALUMODE , DSP4_ALUMODE : std_logic_vector(3 downto 0);
     signal DSP1_INMODE  , DSP2_INMODE  , DSP3_INMODE  , DSP4_INMODE  : std_logic_vector(4 downto 0);
@@ -56,7 +66,7 @@ architecture rtl of ULEARN is
     signal LUT_BASE_ADDR : integer;
 
     signal LUT_ADDRESSING : std_logic_vector(2 downto 0);
-    signal LUT_OFFSET_SIGNED : signed(15 downto 0);
+    signal LUT_OFFSET_SIGNED : signed(LUTWIDTH-1 downto 0);
 
     signal TRACE_PRE : unsigned(7 downto 0);
     signal TRACE_POST , TRACE_POST_P0: unsigned(7 downto 0);
@@ -93,6 +103,8 @@ architecture rtl of ULEARN is
     signal W_SHIFTED : signed(23 downto 0);
     signal W_INT8    : signed(7 downto 0);
     signal W_CLIPPED : signed(7 downto 0);
+
+    signal SYNAPSE_START_ADDRESS_INT : integer;
 
 begin
 
@@ -159,14 +171,14 @@ begin
 
     --CORRELATION ADDRESSING;
 
-    LUT_OFFSET_SIGNED <=    signed(resize(TRACE_PRE, 16))                                  when LUT_ADDRESSING = "000" else
-                            signed(resize(TRACE_POST, 16))                                 when LUT_ADDRESSING = "001" else
-                            signed(resize(TRACE_POST, 16)) - signed(resize(TRACE_PRE, 16)) when LUT_ADDRESSING = "010" else
-                            signed(resize(TRACE_PRE, 16)) - signed(resize(TRACE_POST, 16)) when LUT_ADDRESSING = "011" else
-                            resize(WEIGHT, 16)                                             when LUT_ADDRESSING = "100" else
-                            signed(resize(TRACE_PRE, 16));
+    LUT_OFFSET_SIGNED <=    signed(resize(TRACE_PRE, LUTWIDTH))                                        when LUT_ADDRESSING = "000" else
+                            signed(resize(TRACE_POST, LUTWIDTH))                                       when LUT_ADDRESSING = "001" else
+                            signed(resize(TRACE_POST, LUTWIDTH)) - signed(resize(TRACE_PRE, LUTWIDTH)) when LUT_ADDRESSING = "010" else
+                            signed(resize(TRACE_PRE, LUTWIDTH)) - signed(resize(TRACE_POST, LUTWIDTH)) when LUT_ADDRESSING = "011" else
+                            resize(WEIGHT, LUTWIDTH)                                                   when LUT_ADDRESSING = "100" else
+                            signed(resize(TRACE_PRE, LUTWIDTH));
 
-    LUT_ADDR <= std_logic_vector(to_unsigned(LUT_BASE_ADDR + to_integer(LUT_OFFSET_SIGNED), 16));
+    LUT_ADDR <= std_logic_vector(to_unsigned(LUT_BASE_ADDR + to_integer(LUT_OFFSET_SIGNED), LUTWIDTH));
 
     -- CONDITION CHECKING
 
@@ -216,7 +228,7 @@ begin
 
             else
 
-                if VLD_PP(0) = '1' then
+                if SYN_DIN_VLD = '1' then
                     WEIGHT_PP(0)     <= WEIGHT;
                     TRACE_PRE_PP(0)  <= TRACE_PRE;
                     TRACE_POST_P0    <= TRACE_POST;
@@ -549,7 +561,13 @@ begin
                     W_SELECTED <= resize(WEIGHT_PP(4), 48);
                 end if;
 
-                W_SHIFTED <= shift_right(W_SELECTED(23 downto 0), OUT_SHIFT_VAL);
+                if COND_1_PP(5) = '0' and COND_2_PP(5) = '0' then
+                    W_SHIFTED <= W_SELECTED(23 downto 0);
+                else
+                    W_SHIFTED <= shift_right(W_SELECTED(23 downto 0), OUT_SHIFT_VAL);
+                end if;
+
+               -- W_SHIFTED <= shift_right(W_SELECTED(23 downto 0), OUT_SHIFT_VAL);
 
                 if W_SHIFTED > 127  then
                     W_INT8 <= to_signed(127, 8);
@@ -582,6 +600,23 @@ begin
 
     SYN_DATA_OUT(15 downto 8) <= std_logic_vector(W_CLIPPED);
     SYN_DATA_OUT(7 downto 0) <= std_logic_vector(T_SELECTED);
-    SYN_DOUT_VLD <= VLD_PP(9);      
+    SYN_DOUT_VLD <= VLD_PP(8);
+
+    SYNAPSE_WRITE_ADDRESS <= std_logic_vector(to_unsigned(SYNAPSE_START_ADDRESS_INT,MEMWIDTH));
+    
+    ADDR_COUNTER : process(clk)
+        begin
+            if rising_edge(CLK) then
+
+                if RST = '1' then
+                    SYNAPSE_START_ADDRESS_INT <= to_integer(unsigned(SYNAPSE_START_ADDRESS));
+                else
+                    if VLD_PP(8) = '1' then
+                        SYNAPSE_START_ADDRESS_INT <= SYNAPSE_START_ADDRESS_INT + 1;
+                    end if;
+                end if;
+
+            end if;
+    end process ADDR_COUNTER;
 
 end rtl;
