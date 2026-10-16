@@ -9,25 +9,24 @@ entity CROSSBAR_FABRIC is
             ROW                : integer := 32   ;
             COLUMN             : integer := 32    ;
             SYNAPSE_MEM_DEPTH  : integer := 4096
-
             );
     Port (
-            CB_CLK                          : in  std_logic;
-            CB_VECTOR_RST                   : in  std_logic_vector(0 to COLUMN-1);
-            COLUMN_DISABLE_VECTOR           : in  std_logic_vector(0 to COLUMN-1);
-            SPIKE_IN                        : in  std_logic_vector(ROW-1 downto 0);
-            SPIKE_VLD                       : in  std_logic;
-            SPIKE_OUT                       : out std_logic_vector(ROW-1 downto 0);
-            SPIKE_OUT_VLD                   : out std_logic;
-            TRACE_BUSY                      : out std_logic;
-            COLUMN_PRE_SYNAPTIC_DIN         : in  SYNAPTIC_DATA(0 to COLUMN-1);
-            COLUMN_SYNAPSE_START_ADDRESS    : in  SYNAPSE_ADDRESS(0 to COLUMN-1);
-            PRE_SYN_DATA_PULL               : in  std_logic_vector(0 to COLUMN-1);
-            COLN_SYN_SUM_OUT                : out SYNAPTIC_SUM(0 to COLUMN-1);
-            COLN_VECTOR_SYN_SUM_VALID       : out std_logic_vector(0 to COLUMN-1);
-            COLUMN_POST_SYNAPTIC_DOUT       : out SYNAPTIC_DATA(0 to COLUMN-1);
-            COLUMN_SYNAPSE_WR_ADDRESS       : out SYNAPSE_ADDRESS(0 to COLUMN-1);
-            COLUMN_POST_SYNAPTIC_WREN       : out std_logic_vector(0 to COLUMN-1)
+            CB_CLK                   : in  std_logic;
+            CB_VECTOR_RST            : in  std_logic_vector(0 to COLUMN-1);
+            DISABLE_COLUMN           : in  std_logic_vector(0 to COLUMN-1);
+            SPIKE_IN                 : in  std_logic_vector(ROW-1 downto 0);
+            SPIKE_VLD                : in  std_logic;
+            SPIKE_OUT                : out std_logic_vector(ROW-1 downto 0);
+            SPIKE_OUT_VLD            : out std_logic;
+            TRACE_UPDATING           : out std_logic;
+            SYNAPTIC_DATA_IN         : in  SYNAPTIC_DATA(0 to COLUMN-1);
+            SYNAPTIC_DATA_START_ADDR : in  SYNAPSE_ADDRESS(0 to COLUMN-1);
+            SYNAPTIC_DATA_LOCK       : in  std_logic_vector(0 to COLUMN-1);
+            PARTIAL_CURRENT_OUT      : out SYNAPTIC_SUM(0 to COLUMN-1);
+            PARTIAL_CURRENT_OUT_VLD  : out std_logic_vector(0 to COLUMN-1);
+            SYNAPTIC_DATA_OUT        : out SYNAPTIC_DATA(0 to COLUMN-1);
+            SYNAPTIC_DATA_WRITE_ADDR : out SYNAPSE_ADDRESS(0 to COLUMN-1);
+            SYNAPTIC_DATA_WRITE_EN   : out std_logic_vector(0 to COLUMN-1)
         );
 end CROSSBAR_FABRIC;
 
@@ -228,11 +227,11 @@ begin
                                 
                                         if(CB_VECTOR_RST(k) = '1') then
                        
-                                            COLN_SYN_SUM_OUT(k) <= (others=>'0');
+                                            PARTIAL_CURRENT_OUT(k) <= (others=>'0');
                                             
                                         else
                                         
-                                            COLN_SYN_SUM_OUT(k) <= COL_PARTIAL_SUM(k,0);
+                                            PARTIAL_CURRENT_OUT(k) <= COL_PARTIAL_SUM(k,0);
                                             
                                         end if;      
     
@@ -262,7 +261,7 @@ begin
                      CLK    => CB_CLK           ,
                      RST    => CB_VECTOR_RST(k) ,
                      INPUT  => COLUMN_SUM(k)    ,
-                     OUTPUT => COLN_SYN_SUM_OUT(k)
+                     OUTPUT => PARTIAL_CURRENT_OUT(k)
                  );
 
         end generate COLVEC_GEN;
@@ -286,7 +285,7 @@ begin
                                     
                                     else
 
-                                        COLUMN_PRE_SYNAPTIC_DIN_DLY <= COLUMN_PRE_SYNAPTIC_DIN;
+                                        COLUMN_PRE_SYNAPTIC_DIN_DLY <= SYNAPTIC_DATA_IN;
                                                  
                                             if(ROWLOCK(k) = '1') then
                                                       
@@ -326,7 +325,7 @@ begin
  
     ROWLOCK_GENERATION : for k in 0 to COLUMN/4-1 generate
     
-        ROWLOCK(k) <= PRE_SYN_DATA_PULL(k*4) or PRE_SYN_DATA_PULL(1+k*4) or PRE_SYN_DATA_PULL(2+k*4) or PRE_SYN_DATA_PULL(3+k*4);
+        ROWLOCK(k) <= SYNAPTIC_DATA_LOCK(k*4) or SYNAPTIC_DATA_LOCK(1+k*4) or SYNAPTIC_DATA_LOCK(2+k*4) or SYNAPTIC_DATA_LOCK(3+k*4);
     
     end generate ROWLOCK_GENERATION;
 
@@ -341,10 +340,10 @@ begin
                     
                          if((CB_VECTOR_RST(4*k) or CB_VECTOR_RST(4*k+1) or CB_VECTOR_RST(4*k+2) or CB_VECTOR_RST(4*k+3)) = '1') then
                                     
-                            COLN_VECTOR_SYN_SUM_VALID(4*k)   <= '0';
-                            COLN_VECTOR_SYN_SUM_VALID(1+4*k) <= '0';
-                            COLN_VECTOR_SYN_SUM_VALID(2+4*k) <= '0';
-                            COLN_VECTOR_SYN_SUM_VALID(3+4*k) <= '0';
+                            PARTIAL_CURRENT_OUT_VLD(4*k)   <= '0';
+                            PARTIAL_CURRENT_OUT_VLD(1+4*k) <= '0';
+                            PARTIAL_CURRENT_OUT_VLD(2+4*k) <= '0';
+                            PARTIAL_CURRENT_OUT_VLD(3+4*k) <= '0';
 
                             COLUMN_INTERNAL_FIFO_WREN_DLY1(4*k)   <= '0';        
                             COLUMN_INTERNAL_FIFO_WREN_DLY1(1+4*k) <= '0';        
@@ -370,15 +369,15 @@ begin
                              DELAYCHAIN(3+4*k)(0) <= SPIKE_VLD;
                              DELAYCHAIN(3+4*k)(1 to SUMDELAY) <= DELAYCHAIN(3+4*k)(0 to SUMDELAY-1); 
                              
-                             COLN_VECTOR_SYN_SUM_VALID(4*k)   <= DELAYCHAIN(k)(SUMDELAY);
-                             COLN_VECTOR_SYN_SUM_VALID(1+4*k) <= DELAYCHAIN(k)(SUMDELAY);
-                             COLN_VECTOR_SYN_SUM_VALID(2+4*k) <= DELAYCHAIN(k)(SUMDELAY);
-                             COLN_VECTOR_SYN_SUM_VALID(3+4*k) <= DELAYCHAIN(k)(SUMDELAY);
+                             PARTIAL_CURRENT_OUT_VLD(4*k)   <= DELAYCHAIN(k)(SUMDELAY);
+                             PARTIAL_CURRENT_OUT_VLD(1+4*k) <= DELAYCHAIN(k)(SUMDELAY);
+                             PARTIAL_CURRENT_OUT_VLD(2+4*k) <= DELAYCHAIN(k)(SUMDELAY);
+                             PARTIAL_CURRENT_OUT_VLD(3+4*k) <= DELAYCHAIN(k)(SUMDELAY);
 
-                             COLUMN_INTERNAL_FIFO_WREN_DLY1(4*k)   <= PRE_SYN_DATA_PULL(4*k)  ;
-                             COLUMN_INTERNAL_FIFO_WREN_DLY1(1+4*k) <= PRE_SYN_DATA_PULL(1+4*k);
-                             COLUMN_INTERNAL_FIFO_WREN_DLY1(2+4*k) <= PRE_SYN_DATA_PULL(2+4*k);
-                             COLUMN_INTERNAL_FIFO_WREN_DLY1(3+4*k) <= PRE_SYN_DATA_PULL(3+4*k);
+                             COLUMN_INTERNAL_FIFO_WREN_DLY1(4*k)   <= SYNAPTIC_DATA_LOCK(4*k)  ;
+                             COLUMN_INTERNAL_FIFO_WREN_DLY1(1+4*k) <= SYNAPTIC_DATA_LOCK(1+4*k);
+                             COLUMN_INTERNAL_FIFO_WREN_DLY1(2+4*k) <= SYNAPTIC_DATA_LOCK(2+4*k);
+                             COLUMN_INTERNAL_FIFO_WREN_DLY1(3+4*k) <= SYNAPTIC_DATA_LOCK(3+4*k);
 
                              COLUMN_INTERNAL_FIFO_WREN_DLY2(4*k)   <= COLUMN_INTERNAL_FIFO_WREN_DLY1(4*k)  ;
                              COLUMN_INTERNAL_FIFO_WREN_DLY2(1+4*k) <= COLUMN_INTERNAL_FIFO_WREN_DLY1(1+4*k);
@@ -483,8 +482,8 @@ begin
     
     GENERATE_MEMORY_INTERFACE : for i in 0 to COLUMN-1 generate
     
-        COLUMN_SYNAPSE_WR_ADDRESS(i)(clogb2(SYNAPSE_MEM_DEPTH)-1 downto 0) <= std_logic_vector(to_unsigned(COLUMN_ADDR(i),clogb2(SYNAPSE_MEM_DEPTH)));
-        COLUMN_SYNAPSE_WR_ADDRESS(i)(31 downto clogb2(SYNAPSE_MEM_DEPTH)) <= (others=>'0');
+        SYNAPTIC_DATA_WRITE_ADDR(i)(clogb2(SYNAPSE_MEM_DEPTH)-1 downto 0) <= std_logic_vector(to_unsigned(COLUMN_ADDR(i),clogb2(SYNAPSE_MEM_DEPTH)));
+        SYNAPTIC_DATA_WRITE_ADDR(i)(31 downto clogb2(SYNAPSE_MEM_DEPTH)) <= (others=>'0');
     
     end generate GENERATE_MEMORY_INTERFACE;
     
@@ -518,10 +517,10 @@ begin
     
     INTERNAL_FIFO_CONTROLS : for i in 0 to COLUMN-1 generate
 
-        COLUMN_POST_SYNAPTIC_WREN(i) <= COLUMN_POST_SYNAPTIC_WREN_REG(i) ; 
-        COLUMN_POST_SYNAPTIC_WREN(i) <= COLUMN_POST_SYNAPTIC_WREN_REG(i) ; 
-        COLUMN_POST_SYNAPTIC_WREN(i) <= COLUMN_POST_SYNAPTIC_WREN_REG(i) ; 
-        COLUMN_POST_SYNAPTIC_WREN(i) <= COLUMN_POST_SYNAPTIC_WREN_REG(i) ; 
+        SYNAPTIC_DATA_WRITE_EN(i) <= COLUMN_POST_SYNAPTIC_WREN_REG(i) ; 
+        SYNAPTIC_DATA_WRITE_EN(i) <= COLUMN_POST_SYNAPTIC_WREN_REG(i) ; 
+        SYNAPTIC_DATA_WRITE_EN(i) <= COLUMN_POST_SYNAPTIC_WREN_REG(i) ; 
+        SYNAPTIC_DATA_WRITE_EN(i) <= COLUMN_POST_SYNAPTIC_WREN_REG(i) ; 
     
     end generate INTERNAL_FIFO_CONTROLS;
     
@@ -547,7 +546,7 @@ begin
                                     COLUMN_INTERNAL_FIFO_RDEN(i)   <= '0';
                                     SYNAPSE_COUNTER(i) <= 0;
                                     
-                                    if(SPIKE_VLD = '1' and COLUMN_DISABLE_VECTOR(i) = '0') then
+                                    if(SPIKE_VLD = '1' and DISABLE_COLUMN(i) = '0') then
                                         COLUMN_STATE(i) <= FIFO_RD;
                                     else
                                         COLUMN_STATE(i) <= IDLE;
@@ -580,7 +579,7 @@ begin
     
   end generate POSTSYN_OUT_GEN;
 
-  TRACE_BUSY <= or TRACE_BUSY_VEC;
+  TRACE_UPDATING <= or TRACE_BUSY_VEC;
     
   EVENT_CHECK_GENERATION : for i in 0 to COLUMN-1 generate 
   
@@ -600,16 +599,16 @@ begin
                                      
                                             when IDLE =>
                                            
-                                                COLUMN_POST_SYNAPTIC_DOUT(i)     <= (others=>'0');
+                                                SYNAPTIC_DATA_OUT(i)     <= (others=>'0');
 
                                                 COLUMN_POST_SYNAPTIC_WREN_REG(i)    <= '0';
                                                 
 
                                                 POSTSYN_COUNT(i) <= 0;
                                                 
-                                                if(SPIKE_VLD_D2(i) = '1' and COLUMN_DISABLE_VECTOR(i) = '0') then
+                                                if(SPIKE_VLD_D2(i) = '1' and DISABLE_COLUMN(i) = '0') then
                                                     EVENT_CHECK_STATE(i) <= TIMESTAMP_UPDATE;
-                                                    COLUMN_ADDR(i)   <= to_integer(unsigned(COLUMN_SYNAPSE_START_ADDRESS(i)(clogb2(SYNAPSE_MEM_DEPTH)-1 downto 0)  )) ; 
+                                                    COLUMN_ADDR(i)   <= to_integer(unsigned(SYNAPTIC_DATA_START_ADDR(i)(clogb2(SYNAPSE_MEM_DEPTH)-1 downto 0)  )) ; 
                                                     TRACE_BUSY_VEC(i) <= '1';
                                                 else
                                                     EVENT_CHECK_STATE(i) <= IDLE;
@@ -644,13 +643,13 @@ begin
      
                                                 if(SPIKEDATA(i)(POSTSYN_COUNT(i)) = '1') then
                                                 
-                                                    COLUMN_POST_SYNAPTIC_DOUT(i)(15 downto 8) <= COLUMN_INTERNAL_FIFO_DOUT(i)(15 downto 8);
-                                                    COLUMN_POST_SYNAPTIC_DOUT(i)(7  downto 0) <= (others=>'0');
+                                                    SYNAPTIC_DATA_OUT(i)(15 downto 8) <= COLUMN_INTERNAL_FIFO_DOUT(i)(15 downto 8);
+                                                    SYNAPTIC_DATA_OUT(i)(7  downto 0) <= (others=>'0');
   
                                                 else
                                                 
-                                                    COLUMN_POST_SYNAPTIC_DOUT(i)(15 downto 8) <= COLUMN_INTERNAL_FIFO_DOUT(i)(15 downto 8);
-                                                    COLUMN_POST_SYNAPTIC_DOUT(i)(7  downto 0) <= COLUMN_INTERNAL_FIFO_DOUT(i)(7  downto 0);                                              
+                                                    SYNAPTIC_DATA_OUT(i)(15 downto 8) <= COLUMN_INTERNAL_FIFO_DOUT(i)(15 downto 8);
+                                                    SYNAPTIC_DATA_OUT(i)(7  downto 0) <= COLUMN_INTERNAL_FIFO_DOUT(i)(7  downto 0);                                              
                                                                                                 
                                                 end if;
                                                    
