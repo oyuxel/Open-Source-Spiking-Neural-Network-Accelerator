@@ -4,37 +4,37 @@ use ieee.numeric_std.all;
 
 entity NMC is
     Port ( 
-            NMC_CLK                     : in   std_logic; 
-            NMC_STATE_RST               : in   std_logic; 
-            FMAC_EXTERN_RST             : in   std_logic;
-            NMC_HARD_RST                : in   std_logic; 
-            NMC_COLD_START              : in   std_logic; 
-            PARTIAL_CURRENT_RDY         : in   std_logic;
-            CURRENT_SWITCH_CHANNEL      : in   std_logic; 
-            CURRENT_RESET_CHANNEL       : in   std_logic; 
-            CURRENT_CHANNEL_SWITCHED    : out  std_logic; 
-            CURRENT_RESOURCES_RELEASED  : out  std_logic;
-            NMC_XNEVER_REGION_BASEADDR  : in   std_logic_vector(9 downto 0);
-            NMC_XNEVER_REGION_HIGHADDR  : in   std_logic_vector(9 downto 0);
-            NMODEL_LAST_SPIKE_TIME      : in   STD_LOGIC_VECTOR(7  DOWNTO 0); 
-            NMODEL_SYN_QFACTOR          : in   STD_LOGIC_VECTOR(15 DOWNTO 0); 
-            NMODEL_PF_LOW_ADDR          : in   STD_LOGIC_VECTOR(9  DOWNTO 0); 
-            NMODEL_NPARAM_DATA          : in   STD_LOGIC_VECTOR(15 DOWNTO 0);
-            NMODEL_NPARAM_ADDR          : in   STD_LOGIC_VECTOR(9  DOWNTO 0);
-            NMODEL_REFRACTORY_DUR       : in   std_logic_vector(7  downto 0);
-            NMODEL_PROG_MEM_PORTA_EN    : in   STD_LOGIC;
-            NMODEL_PROG_MEM_PORTA_WEN   : in   STD_LOGIC;
-            NMC_NMODEL_PSUM_IN          : in   std_logic_vector(15 downto 0);
-            NMC_NMODEL_SPIKE_OUT        : out  std_logic; 
-            NMC_NMODEL_SPIKE_VLD        : out  std_logic; 
-            R_NNMODEL_NEW_SPIKE_TIME    : out  std_logic_vector(7  downto 0);
-            R_NMODEL_NPARAM_DATAOUT     : OUT  STD_LOGIC_VECTOR(15 DOWNTO 0);
-            R_NMODEL_REFRACTORY_DUR     : OUT  std_logic_vector(7  downto 0);
-            REDIST_NMODEL_PORTB_TKOVER  : in   std_logic;
-            REDIST_NMODEL_DADDR         : in   std_logic_vector(9 downto 0);
-            NMC_NMODEL_FINISHED         : out std_logic;
-            NMC_MATH_ERROR              : out std_logic;
-            NMC_MEMORY_VIOLATION        : out std_logic
+            NMC_CLK                    : in  std_logic; 
+            NMC_STATE_RST              : in  std_logic; 
+            FMAC_EXTERNAL_RST          : in  std_logic;
+            NMC_HARD_RST               : in  std_logic; 
+            NMC_LAUNCH                 : in  std_logic;
+            PARTIAL_CURRENT_IN         : in  std_logic_vector(15 downto 0); 
+            PARTIAL_CURRENT_VLD        : in  std_logic;
+            CURRENT_SWITCH_CHANNEL     : in  std_logic; 
+            CURRENT_RESET_CHANNEL      : in  std_logic; 
+            CURRENT_CHANNEL_SWITCHED   : out std_logic; 
+            CURRENT_RESOURCES_RELEASED : out std_logic;
+            NMC_XNEVER_REGION_BASEADDR : in  std_logic_vector(9 downto 0);
+            NMC_XNEVER_REGION_HIGHADDR : in  std_logic_vector(9 downto 0);
+            NMODEL_LAST_SPIKE_TIME     : in  STD_LOGIC_VECTOR(7  DOWNTO 0); 
+            NMODEL_SYN_QFACTOR         : in  STD_LOGIC_VECTOR(15 DOWNTO 0); 
+            NMODEL_PF_LOW_ADDR         : in  STD_LOGIC_VECTOR(9  DOWNTO 0); 
+            NMODEL_REFRACTORY_DUR      : in  std_logic_vector(7  downto 0);
+            NMODEL_NEW_SPIKE_TIME      : out std_logic_vector(7  downto 0);
+            NMODEL_NEW_REFRACTORY_DUR  : OUT std_logic_vector(7  downto 0);
+            NMODEL_SPIKE_OUT           : out std_logic; 
+            NMODEL_SPIKE_OUT_VLD       : out std_logic; 
+            NMC_MEM_PORTA_EN           : in  STD_LOGIC;
+            NMC_MEM_PORTA_WEN          : in  STD_LOGIC;
+            NMC_MEM_PORTA_DIN          : in  STD_LOGIC_VECTOR(15 DOWNTO 0);
+            NMC_MEM_PORTA_ADDR         : in  STD_LOGIC_VECTOR(9  DOWNTO 0);
+            NMC_MEM_PORTB_EXT_ACCESS   : in  std_logic;
+            NMC_MEM_PORTB_ADDR         : in  std_logic_vector(9 downto 0);
+            NMC_MEM_PORTB_DOUT         : OUT STD_LOGIC_VECTOR(15 DOWNTO 0);
+            NMODEL_FINISHED            : out std_logic;
+            NMC_MATH_ERROR             : out std_logic;
+            NMC_MEMORY_VIOLATION       : out std_logic
     );
 end NMC;
 
@@ -337,7 +337,7 @@ begin
     PROCESS(NMC_CLK)
     BEGIN
         IF rising_edge(NMC_CLK) THEN
-            IF NMC_STATE_RST = '1' or BRANCH_TAKEN_EX = '1' or NMC_COLD_START = '1' THEN
+            IF NMC_STATE_RST = '1' or BRANCH_TAKEN_EX = '1' or NMC_LAUNCH = '1' THEN
                 SKID_VALID <= '0';
                 SKID_REG   <= (others => '0');
             ELSE
@@ -356,7 +356,7 @@ begin
     PROCESS(NMC_CLK)
     BEGIN
         IF rising_edge(NMC_CLK) THEN
-            IF NMC_STATE_RST = '1' or NMC_COLD_START = '1' THEN
+            IF NMC_STATE_RST = '1' or NMC_LAUNCH = '1' THEN
                 ID_PC <= unsigned(NMODEL_PF_LOW_ADDR);
             ELSIF STALL_SIG = '0' THEN
                 ID_PC <= unsigned(HK_BRAM_ADDRB);
@@ -368,9 +368,9 @@ begin
     Port Map(
         CLK     => NMC_CLK,
         RST     => NMC_STATE_RST or REFRACTORY_FLAG,
-        SS_IN   => NMC_NMODEL_PSUM_IN,
+        SS_IN   => PARTIAL_CURRENT_IN,
         HP_OUT  => HP_OUT_REG,
-        START   => PARTIAL_CURRENT_RDY,
+        START   => PARTIAL_CURRENT_VLD,
         DONE    => PARTIAL_CURRENT_MUX
     );
 
@@ -378,7 +378,7 @@ begin
     PORT MAP ( 
         HK_CLK              => NMC_CLK,
         HK_RST              => NMC_STATE_RST,
-        COLD_START          => NMC_COLD_START,
+        COLD_START          => NMC_LAUNCH,
         PF_LOW              => NMODEL_PF_LOW_ADDR,
         XNEVER_BADDR        => NMC_XNEVER_REGION_BASEADDR,      
         XNEVER_HADDR        => NMC_XNEVER_REGION_HIGHADDR,
@@ -419,7 +419,7 @@ begin
     PROCESS(NMC_CLK)
     BEGIN
         IF rising_edge(NMC_CLK) THEN
-            IF NMC_STATE_RST = '1' or BRANCH_TAKEN_EX = '1' or NMC_COLD_START = '1' THEN
+            IF NMC_STATE_RST = '1' or BRANCH_TAKEN_EX = '1' or NMC_LAUNCH = '1' THEN
                 REG_ID_EX.REG_WE     <= '0';
                 REG_ID_EX.MEM_WE     <= '0';
                 REG_ID_EX.FMAC_START <= '0';
@@ -498,7 +498,7 @@ begin
     PROCESS(NMC_CLK)
     BEGIN
         IF rising_edge(NMC_CLK) THEN
-            IF NMC_STATE_RST = '1' or NMC_COLD_START = '1' THEN
+            IF NMC_STATE_RST = '1' or NMC_LAUNCH = '1' THEN
                 FLAG_LESS  <= '0';
                 FLAG_EQUAL <= '0';
                 FLAG_GREAT <= '0';
@@ -536,7 +536,7 @@ begin
         end if;
     END PROCESS;
 
-    FMAC16_RST_FINAL <= FMAC_EXTERN_RST or REG_ID_EX.FMAC_OPC(1) or CH_FMAC_CLR;
+    FMAC16_RST_FINAL <= FMAC_EXTERNAL_RST or REG_ID_EX.FMAC_OPC(1) or CH_FMAC_CLR;
 
     WORKHORSE : FMAC16
     PORT MAP (
@@ -554,7 +554,7 @@ begin
     PROCESS(NMC_CLK)
     BEGIN
         IF rising_edge(NMC_CLK) THEN
-            IF NMC_STATE_RST = '1' or NMC_COLD_START = '1' THEN
+            IF NMC_STATE_RST = '1' or NMC_LAUNCH = '1' THEN
                 REG_EX_MEM.REG_WE    <= '0';
                 REG_EX_MEM.MEM_WE    <= '0';
                 REG_EX_MEM.GEN_SPIKE <= '0';
@@ -577,23 +577,23 @@ begin
         END IF;
     END PROCESS;
 
-    BRAM_ADDRB <= REDIST_NMODEL_DADDR when REDIST_NMODEL_PORTB_TKOVER = '1' else HK_BRAM_ADDRB;
+    BRAM_ADDRB <= NMC_MEM_PORTB_ADDR when NMC_MEM_PORTB_EXT_ACCESS = '1' else HK_BRAM_ADDRB;
 
-    FINAL_BRAM_ADDRA <= NMODEL_NPARAM_ADDR when NMODEL_PROG_MEM_PORTA_EN = '1' else
+    FINAL_BRAM_ADDRA <= NMC_MEM_PORTA_ADDR when NMC_MEM_PORTA_EN = '1' else
                         CH_BRAM_ADDRA      when CH_RESOURCES_RELEASED = '0' else
                         std_logic_vector(REG_ID_EX.IMM_ADDR);
 
-    FINAL_BRAM_DIA   <= NMODEL_NPARAM_DATA when NMODEL_PROG_MEM_PORTA_EN = '1' else
+    FINAL_BRAM_DIA   <= NMC_MEM_PORTA_DIN when NMC_MEM_PORTA_EN = '1' else
                         CH_BRAM_DIA        when CH_RESOURCES_RELEASED = '0' else
                         EX_OP2;
 
-    FINAL_BRAM_WEA   <= NMODEL_PROG_MEM_PORTA_WEN  when NMODEL_PROG_MEM_PORTA_EN = '1' else
+    FINAL_BRAM_WEA   <= NMC_MEM_PORTA_WEN  when NMC_MEM_PORTA_EN = '1' else
                         CH_BRAM_WEA                when CH_RESOURCES_RELEASED = '0' else
                         REG_ID_EX.MEM_WE;
 
-    PROCESS(NMODEL_PROG_MEM_PORTA_EN, CH_RESOURCES_RELEASED, CH_BRAM_ENA, STALL_SIG, REG_ID_EX, REG_EX_MEM)
+    PROCESS(NMC_MEM_PORTA_EN, CH_RESOURCES_RELEASED, CH_BRAM_ENA, STALL_SIG, REG_ID_EX, REG_EX_MEM)
     BEGIN
-        IF NMODEL_PROG_MEM_PORTA_EN = '1' THEN
+        IF NMC_MEM_PORTA_EN = '1' THEN
             FINAL_BRAM_ENA <= '1';
         ELSIF CH_RESOURCES_RELEASED = '0' THEN
             FINAL_BRAM_ENA <= CH_BRAM_ENA;
@@ -638,7 +638,7 @@ begin
     PROCESS(NMC_CLK)
     BEGIN
         IF rising_edge(NMC_CLK) THEN
-            IF NMC_STATE_RST = '1' or NMC_COLD_START = '1' THEN
+            IF NMC_STATE_RST = '1' or NMC_LAUNCH = '1' THEN
                 REG_MEM_WB.REG_WE    <= '0';
                 REG_MEM_WB.GEN_SPIKE <= '0';
                 REG_MEM_WB.SET_REF   <= '0';
@@ -684,7 +684,7 @@ begin
                     SPK_VLD_PULSE <= '0';
                 END IF;
 
-                if (NMC_COLD_START = '1') then
+                if (NMC_LAUNCH = '1') then
                     REFRACTORY_REG <= NMODEL_REFRACTORY_DUR;
                 elsif (REG_MEM_WB.SET_REF = '1') then
                     REFRACTORY_REG <= REG_MEM_WB.REF_VAL;
@@ -694,8 +694,8 @@ begin
 
                 if (REG_MEM_WB.GEN_SPIKE = '1') then
                     UPD_LAST_SPIKE_TIME <= (others => '0');
-                elsif (NMODEL_LAST_SPIKE_TIME >= X"7F") then
-                    UPD_LAST_SPIKE_TIME <= X"7F";
+                elsif (NMODEL_LAST_SPIKE_TIME >= X"FF") then
+                    UPD_LAST_SPIKE_TIME <= X"FF";
                 else
                     UPD_LAST_SPIKE_TIME <= signed(NMODEL_LAST_SPIKE_TIME) + 1;
                 end if;
@@ -703,13 +703,13 @@ begin
         END IF;
     END PROCESS;
 
-    NMC_NMODEL_SPIKE_OUT <= LATCH_SPIKE_OUT;
-    NMC_NMODEL_FINISHED  <= LATCH_FINISHED;
-    NMC_NMODEL_SPIKE_VLD <= SPK_VLD_PULSE;
+    NMODEL_SPIKE_OUT <= LATCH_SPIKE_OUT;
+    NMODEL_FINISHED  <= LATCH_FINISHED;
+    NMODEL_SPIKE_OUT_VLD <= SPK_VLD_PULSE;
 
     REFRACTORY_FLAG <= '0' when NMODEL_REFRACTORY_DUR = X"00" else '1';
-    R_NNMODEL_NEW_SPIKE_TIME <= std_logic_vector(UPD_LAST_SPIKE_TIME);
-    R_NMODEL_REFRACTORY_DUR  <= REFRACTORY_REG;
-    R_NMODEL_NPARAM_DATAOUT  <= BRAM_DOB;
+    NMODEL_NEW_SPIKE_TIME <= std_logic_vector(UPD_LAST_SPIKE_TIME);
+    NMODEL_NEW_REFRACTORY_DUR  <= REFRACTORY_REG;
+    NMC_MEM_PORTB_DOUT  <= BRAM_DOB;
 
 end dance_me_to_the_end_of_love;
