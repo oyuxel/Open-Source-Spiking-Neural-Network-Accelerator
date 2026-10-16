@@ -358,7 +358,7 @@ class NetworkCompiler:
                     if neuron_in_layer < layer.size:
                         artifact.verbose_neural[col].append(f"\n# --- Layer: {layer.name} | Neuron L-ID: {neuron_in_layer} ---")
                         
-                        cmd_pflow = (OP_PFLOWRFPLST << 28) | ((pflow_start & 0x3FF) << 16) | (0x00 << 8) | 0x7F
+                        cmd_pflow = (OP_PFLOWRFPLST << 28) | ((pflow_start & 0x3FF) << 16) | (0x00 << 8) | 0xFF
                         neural_brams[col].append(cmd_pflow)
                         artifact.verbose_neural[col].append(f"HEX: {cmd_pflow:08X} | PFLOWRFPLST -> NMC Address: {pflow_start}")
 
@@ -371,7 +371,7 @@ class NetworkCompiler:
                                 raise ValueError(f"No projection connected to pin '{pin_name}' in layer '{layer.name}'!")
 
                             w_raw = proj.weights[:, neuron_in_layer].astype(np.uint16)
-                            w_packed = ((w_raw & 0xFF) << 8) | 0x7F
+                            w_packed = ((w_raw & 0xFF) << 8) | 0xFF
 
                             syn_low = syn_addr_ptrs[col]
                             syn_high = syn_low + len(w_packed) - 1
