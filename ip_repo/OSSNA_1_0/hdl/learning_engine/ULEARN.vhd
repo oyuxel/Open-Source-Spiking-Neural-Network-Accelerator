@@ -1,7 +1,7 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
-use work.processor_utils.all;
+use work.crossbar_utils.all;
 
 library UNISIM;
 use UNISIM.vcomponents.all;
@@ -221,8 +221,11 @@ begin
         if rising_edge(CLK) then
             if RST = '1' then
 
-                for k in 0 to 15 loop
+                for k in 0 to 4 loop
                     WEIGHT_PP(k)    <=(others=>'0');
+                end loop;
+
+                for k in 0 to 8 loop
                     TRACE_PRE_PP(k) <= (others=>'0');
                 end loop;
 
@@ -231,11 +234,18 @@ begin
                 if SYN_DIN_VLD = '1' then
                     WEIGHT_PP(0)     <= WEIGHT;
                     TRACE_PRE_PP(0)  <= TRACE_PRE;
-                    TRACE_POST_P0    <= TRACE_POST;
+                --    TRACE_POST_P0    <= TRACE_POST;
                 end if;
 
-                for k in 0 to 14 loop
+--                for k in 0 to 14 loop
+--                    WEIGHT_PP(k+1) <= WEIGHT_PP(k);
+--                    TRACE_PRE_PP(k+1) <= TRACE_PRE_PP(k);
+--                end loop;
+
+                for k in 0 to 3 loop
                     WEIGHT_PP(k+1) <= WEIGHT_PP(k);
+                end loop;
+                for k in 0 to 7 loop
                     TRACE_PRE_PP(k+1) <= TRACE_PRE_PP(k);
                 end loop;
 

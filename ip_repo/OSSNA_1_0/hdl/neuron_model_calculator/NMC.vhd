@@ -44,7 +44,6 @@ architecture dance_me_to_the_end_of_love of NMC is
         Port (
             CLK                 : in  std_logic;
             RST                 : in  std_logic;
-            REFRACTORY          : in  std_logic;
             SWITCH_CHANNEL      : in  std_logic;
             RESET_CHANNEL       : in  std_logic;
             CHANNEL_SWITCHED    : out std_logic;
@@ -93,8 +92,6 @@ architecture dance_me_to_the_end_of_love of NMC is
             HK_RST              : IN  STD_LOGIC;
             COLD_START          : IN  STD_LOGIC;
             PF_LOW              : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
-            XNEVER_BADDR        : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);      
-            XNEVER_HADDR        : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
             MEM_ADDRB           : OUT STD_LOGIC_VECTOR(9 DOWNTO 0);
             MEM_DOB             : IN  STD_LOGIC_VECTOR(15 DOWNTO 0);
             ID_REG_RD_ADDR_0    : OUT STD_LOGIC_VECTOR(2 DOWNTO 0);
@@ -207,8 +204,6 @@ architecture dance_me_to_the_end_of_love of NMC is
     signal REG_ID_EX : T_ID_EX;
 
     type T_EX_MEM is record
-        MEM_ADDR    : std_logic_vector(9 downto 0);
-        STORE_DATA  : std_logic_vector(15 downto 0);
         WR_ADDR     : std_logic_vector(2 downto 0);
         REG_WE      : std_logic;
         REG_MUX     : std_logic;
@@ -305,7 +300,6 @@ begin
     Port Map(
         CLK                 => NMC_CLK,
         RST                 => NMC_STATE_RST,
-        REFRACTORY          => REFRACTORY_FLAG,
         SWITCH_CHANNEL      => CURRENT_SWITCH_CHANNEL,
         RESET_CHANNEL       => CURRENT_RESET_CHANNEL,
         CHANNEL_SWITCHED    => CURRENT_CHANNEL_SWITCHED,
@@ -380,8 +374,6 @@ begin
         HK_RST              => NMC_STATE_RST,
         COLD_START          => NMC_LAUNCH,
         PF_LOW              => NMODEL_PF_LOW_ADDR,
-        XNEVER_BADDR        => NMC_XNEVER_REGION_BASEADDR,      
-        XNEVER_HADDR        => NMC_XNEVER_REGION_HIGHADDR,
         MEM_ADDRB           => HK_BRAM_ADDRB,
         MEM_DOB             => ID_INSTR,
         ID_REG_RD_ADDR_0    => HK_RD_ADDR_0,
@@ -563,8 +555,6 @@ begin
             ELSIF FMAC_BUSY_SIG = '1' THEN
                 REG_EX_MEM <= REG_EX_MEM;
             ELSE
-                REG_EX_MEM.MEM_ADDR   <= std_logic_vector(REG_ID_EX.IMM_ADDR);
-                REG_EX_MEM.STORE_DATA <= EX_OP2;
                 REG_EX_MEM.WR_ADDR    <= REG_ID_EX.WR_ADDR;
                 REG_EX_MEM.REG_WE     <= REG_ID_EX.REG_WE;
                 REG_EX_MEM.REG_MUX    <= REG_ID_EX.REG_MUX;

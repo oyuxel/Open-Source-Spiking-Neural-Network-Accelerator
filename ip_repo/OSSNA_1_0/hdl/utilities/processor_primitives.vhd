@@ -83,7 +83,6 @@ component BRIDGE is
         NETWORK_LOW_ADDRESS          : in  std_logic_vector(clogb2(NEURAL_MEM_DEPTH)-1 downto 0);
         GT_START                     : in  std_logic;
         GT_COMPLETED                 : out std_logic;
-        SKIP_LEARNING_PROCESS        : in  std_logic;
         EVENT_ACCEPTANCE             : out std_logic;
         EVENT_DETECT                 : in  std_logic;
  
@@ -94,10 +93,8 @@ component BRIDGE is
         WRITE_AUXBUFFER              : out std_logic;
  
         SYNAPTIC_MEM_RDADDR          : out std_logic_vector(clogb2(SYNAPSE_MEM_DEPTH)-1 downto 0);
-        SYNAPTIC_MEM_ENABLE          : out std_logic;
         SYNAPTIC_MEM_WRADDR          : out std_logic_vector(clogb2(SYNAPSE_MEM_DEPTH)-1 downto 0);
-        SYNAPTIC_MEM_WREN            : out std_logic;
- 
+
         SYNAPTIC_DATA_LOCK           : out std_logic;
         DISABLE_COLUMN               : out std_logic;
         TRACE_UPDATING               : in  std_logic;
@@ -135,7 +132,6 @@ component BRIDGE is
 
         PARAMETER_MEM_ADDRA          : out std_logic_vector(clogb2(NEURAL_MEM_DEPTH)-1 downto 0);
         PARAMETER_MEM_WEA            : out std_logic;
-        PARAMETER_MEM_ENA            : out std_logic;
         PARAMETER_MEM_RSTA           : out std_logic;
         PARAMETER_MEM_DOUTA          : in  std_logic_vector(31 downto 0);
         PARAMETER_MEM_DINA           : out std_logic_vector(31 downto 0)

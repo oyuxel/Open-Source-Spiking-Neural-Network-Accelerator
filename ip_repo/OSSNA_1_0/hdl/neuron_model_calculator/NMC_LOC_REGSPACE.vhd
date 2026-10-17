@@ -21,8 +21,8 @@ ARCHITECTURE SUMMER_WINE OF NMC_LOC_REGSPACE IS
     type ram_type is array (7 downto 0) of std_logic_vector (15 downto 0);
     signal REGSPACE : ram_type;
 
-    attribute RAM_STYLE : string;
-    attribute RAM_STYLE of REGSPACE: signal is "DISTRIBUTED";
+--    attribute RAM_STYLE : string;
+--    attribute RAM_STYLE of REGSPACE: signal is "DISTRIBUTED";
 
     BEGIN
 
@@ -46,7 +46,6 @@ ARCHITECTURE SUMMER_WINE OF NMC_LOC_REGSPACE IS
 
     end process WRCNTRL;
 
-    -- WRITE-FIRST (Bypass) MANTIĞI: Yazılan veriyi aynı anda okumak isteyene doğrudan ver!
     DOUT_0 <= DATA_IN when (WR_EN = '1' and WR_ADDR = RD_ADDR_0) else 
               REGSPACE(to_integer(unsigned(RD_ADDR_0)));
 

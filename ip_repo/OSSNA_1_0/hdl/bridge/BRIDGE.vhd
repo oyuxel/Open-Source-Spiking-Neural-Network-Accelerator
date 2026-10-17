@@ -1,7 +1,7 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
-use work.processor_utils.all;
+use work.crossbar_utils.all;
 
 entity BRIDGE is
     Generic (
@@ -17,7 +17,6 @@ entity BRIDGE is
         NETWORK_LOW_ADDRESS          : in  std_logic_vector(clogb2(NEURAL_MEM_DEPTH)-1 downto 0);
         GT_START                     : in  std_logic;
         GT_COMPLETED                 : out std_logic;
-        SKIP_LEARNING_PROCESS        : in  std_logic;
         EVENT_ACCEPTANCE             : out std_logic;
         EVENT_DETECT                 : in  std_logic;
  
@@ -28,9 +27,7 @@ entity BRIDGE is
         WRITE_AUXBUFFER              : out std_logic;
  
         SYNAPTIC_MEM_RDADDR          : out std_logic_vector(clogb2(SYNAPSE_MEM_DEPTH)-1 downto 0);
-        SYNAPTIC_MEM_ENABLE          : out std_logic;
         SYNAPTIC_MEM_WRADDR          : out std_logic_vector(clogb2(SYNAPSE_MEM_DEPTH)-1 downto 0);
-        SYNAPTIC_MEM_WREN            : out std_logic;
  
         SYNAPTIC_DATA_LOCK           : out std_logic;
         DISABLE_COLUMN               : out std_logic;
@@ -69,7 +66,6 @@ entity BRIDGE is
 
         PARAMETER_MEM_ADDRA          : out std_logic_vector(clogb2(NEURAL_MEM_DEPTH)-1 downto 0);
         PARAMETER_MEM_WEA            : out std_logic;
-        PARAMETER_MEM_ENA            : out std_logic;
         PARAMETER_MEM_RSTA           : out std_logic;
         PARAMETER_MEM_DOUTA          : in  std_logic_vector(31 downto 0);
         PARAMETER_MEM_DINA           : out std_logic_vector(31 downto 0)
@@ -133,23 +129,17 @@ architecture crush_with_eyeliner of BRIDGE is
     
     signal is_next_neuron      : std_logic;
     signal is_barrier_sync     : std_logic;
-    signal is_learning_en      : std_logic;
     signal is_timestep_upd     : std_logic;
 
     signal  MEMLOC                   : integer;
     signal  NEURON_SPACE             : integer;
-    signal  MEMORY_LATENCY           : integer;
     constant SYNAPSE_BATCH_SIZE      : integer := ROW;
-    signal SYNAPSE_LOW_ADDRESS       : integer range 0 to SYNAPSE_MEM_DEPTH-1;
     signal SYNAPSE_HIGH_ADDRESS      : integer range 0 to SYNAPSE_MEM_DEPTH-1;
     signal SYNAPSE_LOCATION          : integer range 0 to SYNAPSE_MEM_DEPTH-1;
     signal SYNAPSE_LOCATION_PAST_RD  : integer range 0 to SYNAPSE_MEM_DEPTH-1;
     signal SYNAPSE_LOCATION_PAST_WR  : integer range 0 to SYNAPSE_MEM_DEPTH-1;
     signal DLYCNTR                   : integer range 0 to NEURAL_MEM_DEPTH-1;
-    signal EVENT_ACCEPTANCE_REG      : std_logic;
-    signal SYNAPSE_PULL_TIMEOUT      : integer;
     signal CURRENT_ACC_DLYCNTR       : integer;
-    signal POSTSYNDLYCNTR            : integer;
 
     constant SYNAPSE_ADDR_WIDTH : integer := clogb2(SYNAPSE_MEM_DEPTH);
 
@@ -159,7 +149,6 @@ architecture crush_with_eyeliner of BRIDGE is
 
     signal NEXT_NEURON_PRESENT    : std_logic;
     signal JUMP_BARRIER_STATE     : std_logic;
-    signal LEARNING_ENABLED       : std_logic;
     signal UPDATE_GLOBAL_TIMESTEP : std_logic;
 
     signal ULEARN_CFG_WORD_BASE : integer range 0 to 1023;
@@ -193,7 +182,6 @@ architecture crush_with_eyeliner of BRIDGE is
 
     is_next_neuron      <= PARAMETER_MEM_DOUTA(0);
     is_barrier_sync     <= PARAMETER_MEM_DOUTA(1);
-    is_learning_en      <= PARAMETER_MEM_DOUTA(2);
     is_timestep_upd     <= PARAMETER_MEM_DOUTA(3);
 
     MSM : process (BRIDGE_CLK) begin
@@ -216,8 +204,6 @@ architecture crush_with_eyeliner of BRIDGE is
                         READ_AUX_BUFFER            <= '0';
                         WRITE_OUTBUFFER            <= '0'; 
                         WRITE_AUXBUFFER            <= '0';
-                        SYNAPTIC_MEM_ENABLE        <= '0'; 
-                        SYNAPTIC_MEM_WREN          <= '0'; 
                         SYNAPTIC_DATA_LOCK          <= '0'; 
                         DISABLE_COLUMN             <= '0'; 
                         NMC_STATE_RST              <= '1';  
@@ -236,25 +222,18 @@ architecture crush_with_eyeliner of BRIDGE is
                         SYNAPTIC_MEM_PORTA_MUX           <= '0'; 
                         ULEARN_RST                  <= '1'; 
                         PARAMETER_MEM_WEA                        <= '0';               
-                        PARAMETER_MEM_ENA                        <= '1';                     			     
                         PARAMETER_MEM_RSTA                       <= '1';                     			     
                         PARAMETER_MEM_DINA                       <= (others=>'0');
                         MEMLOC                     <= 0;
                         NEURON_SPACE               <= 0;
-                        SYNAPSE_LOW_ADDRESS        <= 0;
                         SYNAPSE_HIGH_ADDRESS       <= 0;
-                        MEMORY_LATENCY             <= 0;
-                        EVENT_ACCEPTANCE_REG       <= '0';
-                        SYNAPSE_PULL_TIMEOUT       <=  0;
                         CURRENT_ACC_DLYCNTR        <=  0;
-                        POSTSYNDLYCNTR             <=  0;
                         SYNAPSE_LOCATION           <=  0;
                         SYNAPSE_LOCATION_PAST_RD   <=  0;
                         SYNAPSE_LOCATION_PAST_WR   <=  0;
                         REWIND_FLAG                <= '0';
                         NEXT_NEURON_PRESENT        <= '0';
                         JUMP_BARRIER_STATE         <= '0';
-                        LEARNING_ENABLED           <= '0';
                         UPDATE_GLOBAL_TIMESTEP     <= '0';
                         BARRIER_SYNC_OUT           <= '0';
                         ULEARN_CFG_WORD         <= (others=>'0');
@@ -287,26 +266,7 @@ architecture crush_with_eyeliner of BRIDGE is
 
                         BRIDGE_STATE   <= FETCH_DELAY;
 
-                     --   if MEMORY_LATENCY = 1 then
-
-                          --  MEMORY_LATENCY <= 0;
---
-                         --   if REWIND_FLAG = '1' then
-
-                          --      BRIDGE_STATE   <= REWIND;
-
-                          --  else
-
-                           --     BRIDGE_STATE   <= DECODE;
-                          --      NEURON_SPACE   <= NEURON_SPACE + 1;
-
-                          --  end if;
-
-                       -- else
-                         --   MEMORY_LATENCY <= MEMORY_LATENCY + 1;
-                            MEMLOC                 <= MEMLOC + 1;
-                           -- NEURON_SPACE           <= NEURON_SPACE + 1;
-                      --  end if;
+                        MEMLOC                 <= MEMLOC + 1;
 
                     when FETCH_DELAY =>
 
@@ -317,7 +277,6 @@ architecture crush_with_eyeliner of BRIDGE is
                         else
 
                             BRIDGE_STATE   <= DECODE;
-                        --    NEURON_SPACE   <= NEURON_SPACE + 1;
 
                         end if;
 
@@ -337,7 +296,6 @@ architecture crush_with_eyeliner of BRIDGE is
 
                         elsif opcode = SYNLOW then
 
-                            SYNAPSE_LOW_ADDRESS <= to_integer(unsigned(micro_addr(SYNAPSE_ADDR_WIDTH-1 downto 0)));
                             SYNAPSE_LOCATION    <= to_integer(unsigned(micro_addr(SYNAPSE_ADDR_WIDTH-1 downto 0)));
                             SYNAPSE_LOCATION_PAST_RD <= to_integer(unsigned(micro_addr(SYNAPSE_ADDR_WIDTH-1 downto 0)));
                             BRIDGE_STATE        <= FETCH;
@@ -347,7 +305,6 @@ architecture crush_with_eyeliner of BRIDGE is
                         elsif opcode = SYNHIGH then
 
                             SYNAPSE_HIGH_ADDRESS <= to_integer(unsigned(micro_addr(SYNAPSE_ADDR_WIDTH-1 downto 0)));
-                            SYNAPTIC_MEM_ENABLE  <= '1';
                             SYNAPTIC_MEM_PORTA_MUX     <= '0';
                             BRIDGE_STATE         <= PULLSYNAPSES;
 
@@ -374,7 +331,6 @@ architecture crush_with_eyeliner of BRIDGE is
 
                             NEXT_NEURON_PRESENT    <= is_next_neuron  ;
                             JUMP_BARRIER_STATE     <= is_barrier_sync ;
-                            LEARNING_ENABLED       <= is_learning_en  ;
                             UPDATE_GLOBAL_TIMESTEP <= is_timestep_upd ;
                             BRIDGE_STATE           <= ENDFLOW_BRANCH;
 
@@ -405,8 +361,6 @@ architecture crush_with_eyeliner of BRIDGE is
 
                                 SYNAPSE_LOCATION    <= SYNAPSE_LOCATION + 1;
                                 SYNAPTIC_DATA_LOCK   <= '1';
-                                SYNAPTIC_MEM_ENABLE <= '1';
-                                SYNAPTIC_MEM_WREN   <= '1';
                        
                             end if;
 

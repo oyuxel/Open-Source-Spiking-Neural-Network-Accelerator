@@ -7,7 +7,6 @@ entity CURRENT_HANDLER is
         CLK                 : in  std_logic;
         RST                 : in  std_logic; 
         
-        REFRACTORY          : in  std_logic;
         SWITCH_CHANNEL      : in  std_logic; 
         RESET_CHANNEL       : in  std_logic; 
         CHANNEL_SWITCHED    : out std_logic; 
@@ -115,7 +114,7 @@ begin
 
                         RESOURCES_RELEASED  <= '1';
 
-                        FMAC_CLR            <= '0';                     
+                        FMAC_CLR_REG            <= '0';                     
 
                         BRAM_ADDRA          <= (others=>'0');
                         BRAM_DIA            <= (others=>'0');

@@ -24,7 +24,6 @@ architecture california_dreamin of SS_2_HP is
     signal FPMANT         : std_logic_vector(9 downto 0);
     constant LOWLIM       : integer := -14;
     constant EXPBIAS      : integer := 15;
-    signal BITCOUNTER     : integer range 0 to 15;
     type STATES is (IDLE, TAKE, BREW, SEND);
     signal SS_2_HP_STATE  : STATES := IDLE;
 
@@ -35,7 +34,6 @@ begin
             if RST = '1' then
                 SS_2_HP_STATE <= IDLE;
                 DONE <= '0';
-                BITCOUNTER <= 0;
                 sign_indicator <= '0';
                 FPSIGN <= '0';
                 twos_comp <= (others=>'0');
@@ -48,7 +46,6 @@ begin
                 case SS_2_HP_STATE is
                     when IDLE =>
                         DONE <= '0';
-                        BITCOUNTER <= 0;
                         if START = '1' then
                             SS_2_HP_STATE <= TAKE;
                             if SS_IN(15) = '1' then
@@ -79,7 +76,6 @@ begin
                             SS_2_HP_STATE <= SEND;
                         else
                             proc <= shift_left(proc,1);
-                            BITCOUNTER <= BITCOUNTER + 1;
                             FPEXP_S1 <= FPEXP_S1 - 1;
                         end if;
                     when SEND =>

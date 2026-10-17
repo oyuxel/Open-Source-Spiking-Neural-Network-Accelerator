@@ -10,8 +10,6 @@ ENTITY HOUSEKEEPER IS
             COLD_START          : IN  STD_LOGIC;
             
             PF_LOW              : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
-            XNEVER_BADDR        : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);      
-            XNEVER_HADDR        : IN  STD_LOGIC_VECTOR(9 DOWNTO 0);
 
             MEM_ADDRB           : OUT STD_LOGIC_VECTOR(9 DOWNTO 0);
             MEM_DOB             : IN  STD_LOGIC_VECTOR(15 DOWNTO 0);

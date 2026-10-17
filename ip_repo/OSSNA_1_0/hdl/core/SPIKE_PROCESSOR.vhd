@@ -388,8 +388,8 @@ BRIDGES : for i in 0 to CROSSBAR_COL_WIDTH-1 generate
             EVENT_ACCEPTANCE           => BRIDGE_EVENT_ACCEPT(i)                ,
         
             READ_MAIN_SPIKE_BUFFER     => BRIDGE_READ_MAIN_SPIKE_BUFFER(i)         ,
-            READ_CIRCULAR_BUFFER       =>  BRIDGE_READ_CIRCULAR_BUFFER(i)           ,
-            READ_AUX_BUFFER            =>  BRIDGE_READ_AUX_BUFFER(i)        ,
+            READ_CIRCULAR_BUFFER       => BRIDGE_READ_CIRCULAR_BUFFER(i)           ,
+            READ_AUX_BUFFER            => BRIDGE_READ_AUX_BUFFER(i)        ,
             WRITE_OUTBUFFER            => BRIDGE_WRITE_OUTBUFFER(i)                ,
             WRITE_AUXBUFFER            => BRIDGE_WRITE_AUXBUFFER(i)                ,
 
