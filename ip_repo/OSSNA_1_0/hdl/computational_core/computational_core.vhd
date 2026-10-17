@@ -1,7 +1,6 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
-use work.processor_utils.all;
 use work.crossbar_utils.all;
 use work.processor_primitives.all;
 

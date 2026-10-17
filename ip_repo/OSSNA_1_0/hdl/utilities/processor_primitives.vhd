@@ -187,47 +187,47 @@ component CROSSBAR_FABRIC is
         );
 end component CROSSBAR_FABRIC;
 
-component or_reduce is
-    generic (
-        N : integer := 8  
-    );
-    port (
-        A : in  STD_LOGIC_VECTOR(N-1 downto 0);
-        Y : out STD_LOGIC 
-    );
-end component or_reduce;
-
-component and_reduce is
-    generic (
-        N : integer := 8  
-    );
-    port (
-        A : in  STD_LOGIC_VECTOR(N-1 downto 0);
-        Y : out STD_LOGIC 
-    );
-end component and_reduce;
-
-component Synapse_Dout_Mux is
-	Generic (
-		CROSSBAR_COL_WIDTH  : integer := 32
-		);
-    Port ( 
-        SYNAPSE_MEM_SELECT   : in  std_logic_vector(clogb2(CROSSBAR_COL_WIDTH)-1 downto 0);
-        SYNAPSE_MEM_DOUT     : in  SYNAPTICMEMDATA(0 to CROSSBAR_COL_WIDTH-1);
-        MUXDOUT              : out std_logic_vector(15 downto 0)
-        );
-end component Synapse_Dout_Mux;
-
-component Param_Dout_Mux is
-	Generic (
-		CROSSBAR_COL_WIDTH  : integer := 32
-		);
-    Port ( 
-        PARAM_MEM_SELECT   : in  std_logic_vector(clogb2(CROSSBAR_COL_WIDTH)-1 downto 0);
-        PARAM_MEM_DOUT     : in  PARAMMEMDATA(0 to CROSSBAR_COL_WIDTH-1);
-        MUXDOUT            : out std_logic_vector(31 downto 0)
-        );
-end component Param_Dout_Mux;
+--component or_reduce is
+--    generic (
+--        N : integer := 8  
+--    );
+--    port (
+--        A : in  STD_LOGIC_VECTOR(N-1 downto 0);
+--        Y : out STD_LOGIC 
+--    );
+--end component or_reduce;
+--
+--component and_reduce is
+--    generic (
+--        N : integer := 8  
+--    );
+--    port (
+--        A : in  STD_LOGIC_VECTOR(N-1 downto 0);
+--        Y : out STD_LOGIC 
+--    );
+--end component and_reduce;
+--
+--component Synapse_Dout_Mux is
+--	Generic (
+--		CROSSBAR_COL_WIDTH  : integer := 32
+--		);
+--    Port ( 
+--        SYNAPSE_MEM_SELECT   : in  std_logic_vector(clogb2(CROSSBAR_COL_WIDTH)-1 downto 0);
+--        SYNAPSE_MEM_DOUT     : in  SYNAPTICMEMDATA(0 to CROSSBAR_COL_WIDTH-1);
+--        MUXDOUT              : out std_logic_vector(15 downto 0)
+--        );
+--end component Synapse_Dout_Mux;
+--
+--component Param_Dout_Mux is
+--	Generic (
+--		CROSSBAR_COL_WIDTH  : integer := 32
+--		);
+--    Port ( 
+--        PARAM_MEM_SELECT   : in  std_logic_vector(clogb2(CROSSBAR_COL_WIDTH)-1 downto 0);
+--        PARAM_MEM_DOUT     : in  PARAMMEMDATA(0 to CROSSBAR_COL_WIDTH-1);
+--        MUXDOUT            : out std_logic_vector(31 downto 0)
+--        );
+--end component Param_Dout_Mux;
 
 component OUTFIFO is
     generic(

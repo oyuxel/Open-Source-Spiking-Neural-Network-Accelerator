@@ -18,7 +18,7 @@ entity CROSSBAR_FABRIC is
             SPIKE_VLD                : in  std_logic;
             SPIKE_OUT                : out std_logic_vector(ROW-1 downto 0);
             SPIKE_OUT_VLD            : out std_logic;
-            TRACE_UPDATING           : out std_logic;
+            TRACE_UPDATING           : out std_logic_vector(0 to COLUMN-1);
             SYNAPTIC_DATA_IN         : in  SYNAPTIC_DATA(0 to COLUMN-1);
             SYNAPTIC_DATA_START_ADDR : in  SYNAPSE_ADDRESS(0 to COLUMN-1);
             SYNAPTIC_DATA_LOCK       : in  std_logic_vector(0 to COLUMN-1);
@@ -106,7 +106,7 @@ architecture wind_of_change of CROSSBAR_FABRIC is
      
      signal COLUMN_PRE_SYNAPTIC_DIN_DLY : SYNAPTIC_DATA(0 to COLUMN-1);
 
-     signal TRACE_BUSY_VEC : std_logic_vector(ROW-1 downto 0); 
+     signal TRACE_BUSY_VEC : std_logic_vector(0 to COLUMN-1); 
 
 begin
 
@@ -579,7 +579,7 @@ begin
     
   end generate POSTSYN_OUT_GEN;
 
-  TRACE_UPDATING <= or TRACE_BUSY_VEC;
+  TRACE_UPDATING <= TRACE_BUSY_VEC;
     
   EVENT_CHECK_GENERATION : for i in 0 to COLUMN-1 generate 
   
