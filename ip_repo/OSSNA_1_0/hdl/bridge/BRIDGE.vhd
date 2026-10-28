@@ -58,6 +58,8 @@ entity BRIDGE is
 
         NMODEL_FINISHED              : in  std_logic;
 
+        NMC_OUTPUT_SPIKES_LATCH      : in  std_logic;
+
         SYNAPTIC_MEM_PORTA_MUX       : out std_logic;
         ULEARN_RST                   : out std_logic;
         ULEARN_CFG_WORD              : out std_logic_vector(255 downto 0);
@@ -86,6 +88,7 @@ architecture crush_with_eyeliner of BRIDGE is
                     ENDFLOW_BRANCH,
                     BARRIER,
                     LAUNCH_NMC,
+                    SPIKE_SYNCHRONIZATION,
                     REWIND,
                     REWIND_READ_DELAY,
                     WAIT_NPARAM_DATA,
@@ -157,7 +160,7 @@ architecture crush_with_eyeliner of BRIDGE is
 
     begin
 
-    PARAMETER_MEM_ADDRA               <= std_logic_vector(to_unsigned(MEMLOC, PARAMETER_MEM_ADDRA'length));
+    PARAMETER_MEM_ADDRA <= std_logic_vector(to_unsigned(MEMLOC, PARAMETER_MEM_ADDRA'length));
     SYNAPTIC_MEM_RDADDR <= std_logic_vector(to_unsigned(SYNAPSE_LOCATION, SYNAPTIC_MEM_RDADDR'length));
     SYNAPTIC_MEM_WRADDR <= std_logic_vector(to_unsigned(SYNAPSE_LOCATION_PAST_WR, SYNAPTIC_MEM_WRADDR'length));
 
@@ -208,7 +211,7 @@ architecture crush_with_eyeliner of BRIDGE is
                         DISABLE_COLUMN             <= '0'; 
                         NMC_STATE_RST              <= '1';  
                         NMC_FMAC_RST               <= '0';  
-                        NMC_LAUNCH             <= '0';  
+                        NMC_LAUNCH                 <= '0';  
                         NMODEL_LAST_SPIKE_TIME     <= (others=>'0');
                         NMODEL_SYN_QFACTOR         <= (others=>'0');
                         NMODEL_PF_LOW_ADDR         <= (others=>'0');
@@ -240,6 +243,7 @@ architecture crush_with_eyeliner of BRIDGE is
                         ULEARN_CFG_WORD_PCOUNTER   <= 0;                   
                         ULEARN_HIGH_ADDR           <= 0;
                         ULEARN_SYN_DIN_VLD <= '0';
+                        EVENT_ACCEPTANCE           <= '0';
 
                         if GT_START = '1' then
                             BRIDGE_STATE <= SET_NETWORK_START_ADDRESS;
@@ -443,6 +447,12 @@ architecture crush_with_eyeliner of BRIDGE is
 
                             BARRIER_SYNC_OUT <= '1';
                             NMC_STATE_RST <= '0'; 
+                            EVENT_ACCEPTANCE        <= '1';
+                            READ_MAIN_SPIKE_BUFFER  <= '1';
+                            READ_CIRCULAR_BUFFER    <= '1';
+                            READ_AUX_BUFFER         <= '1';
+                            WRITE_OUTBUFFER         <= '1';
+                            WRITE_AUXBUFFER         <= '1';
 
                             if BARRIER_SYNC_IN = '1' then
 
@@ -452,11 +462,24 @@ architecture crush_with_eyeliner of BRIDGE is
                                     NEXT_NEURON_PRESENT <= '0';
                                     --NEURON_SPACE <= -1;
                                     NEURON_SPACE <= 0;
+                                    EVENT_ACCEPTANCE        <= '0';
+                                    READ_MAIN_SPIKE_BUFFER  <= '0';
+                                    READ_CIRCULAR_BUFFER    <= '0';
+                                    READ_AUX_BUFFER         <= '0';
+                                    WRITE_OUTBUFFER         <= '0';
+                                    WRITE_AUXBUFFER         <= '0';
 
                                 elsif NEXT_NEURON_PRESENT = '0' and UPDATE_GLOBAL_TIMESTEP = '1' then
 
                                     BRIDGE_STATE   <= GLOBAL_TIMESTEP;
                                     UPDATE_GLOBAL_TIMESTEP <= '0';
+
+                                    EVENT_ACCEPTANCE        <= '0';
+                                    READ_MAIN_SPIKE_BUFFER  <= '0';
+                                    READ_CIRCULAR_BUFFER    <= '0';
+                                    READ_AUX_BUFFER         <= '0';
+                                    WRITE_OUTBUFFER         <= '0';
+                                    WRITE_AUXBUFFER         <= '0';
 
                                 end if;
 
@@ -476,9 +499,17 @@ architecture crush_with_eyeliner of BRIDGE is
 
                             if NMODEL_FINISHED = '1' then
 
+                                BRIDGE_STATE <= SPIKE_SYNCHRONIZATION;
+                            
+                            end if;
+                        
+                        when SPIKE_SYNCHRONIZATION =>
+
+                            if NMC_OUTPUT_SPIKES_LATCH = '1' then
                                 BRIDGE_STATE <= REWIND_READ_DELAY;
                                 MEMLOC       <= MEMLOC - NEURON_SPACE;
-                            
+                            else
+                                BRIDGE_STATE <= SPIKE_SYNCHRONIZATION;
                             end if;
 
                         when REWIND_READ_DELAY => 
@@ -491,22 +522,22 @@ architecture crush_with_eyeliner of BRIDGE is
 
                             if opcode = PFLOWRFPLST then
 
-                                PARAMETER_MEM_DINA         <= PARAMETER_MEM_DOUTA(31 downto 16) & NMODEL_NEW_REFRACTORY_DUR & NMODEL_NEW_SPIKE_TIME;
-                                PARAMETER_MEM_WEA          <= '1';
-                                BRIDGE_STATE <= FETCH;
+                                PARAMETER_MEM_DINA <= PARAMETER_MEM_DOUTA(31 downto 16) & NMODEL_NEW_REFRACTORY_DUR & NMODEL_NEW_SPIKE_TIME;
+                                PARAMETER_MEM_WEA  <= '1';
+                                BRIDGE_STATE       <= FETCH;
 
                             elsif opcode = NPADDRDATA then
 
                                 NMC_MEM_PORTB_EXT_ACCESS <= '1';
-                                NMC_MEM_PORTB_ADDR        <= nmc_target_addr;
-                                BRIDGE_STATE               <= WAIT_NPARAM_DATA;
+                                NMC_MEM_PORTB_ADDR       <= nmc_target_addr;
+                                BRIDGE_STATE             <= WAIT_NPARAM_DATA;
                             
                             elsif opcode = ULEARNCFGLOW then
 
-                                BRIDGE_STATE               <= ULEARN_CFG_PART;
+                                BRIDGE_STATE             <= ULEARN_CFG_PART;
                                 NMC_MEM_PORTB_EXT_ACCESS <= '1';
-                                ULEARN_CFG_WORD_BASE       <= to_integer(unsigned(micro_addr(9 downto 0)));
-                                ULEARN_CFG_WORD_PCOUNTER   <= 0;
+                                ULEARN_CFG_WORD_BASE     <= to_integer(unsigned(micro_addr(9 downto 0)));
+                                ULEARN_CFG_WORD_PCOUNTER <= 0;
 
                             elsif opcode = ULEARNLOWSYNADDR then
 
@@ -516,16 +547,16 @@ architecture crush_with_eyeliner of BRIDGE is
 
                             elsif opcode = ULEARNHIGHSYNADDR then
 
-                                ULEARN_HIGH_ADDR <= to_integer(unsigned(micro_addr(SYNAPSE_ADDR_WIDTH-1 downto 0)));
-                                BRIDGE_STATE     <= RESET_ULEARN;
-                                ULEARN_RST        <= '1';
+                                ULEARN_HIGH_ADDR       <= to_integer(unsigned(micro_addr(SYNAPSE_ADDR_WIDTH-1 downto 0)));
+                                BRIDGE_STATE           <= RESET_ULEARN;
+                                ULEARN_RST             <= '1';
                                 SYNAPTIC_MEM_PORTA_MUX <= '1';
 
                             elsif opcode = ENDFLOW then
     
-                                BRIDGE_STATE <= BARRIER;
-                                REWIND_FLAG  <= '0'; 
-                                NMC_STATE_RST              <= '1'; 
+                                BRIDGE_STATE  <= BARRIER;
+                                REWIND_FLAG   <= '0'; 
+                                NMC_STATE_RST <= '1'; 
 
                             else
                                 
@@ -539,10 +570,10 @@ architecture crush_with_eyeliner of BRIDGE is
 
                         when SWAP_NPARAM_DATA =>
 
-                            PARAMETER_MEM_DINA                       <= PARAMETER_MEM_DOUTA(31 downto 16) & NMC_MEM_PORTB_DOUT;
-                            PARAMETER_MEM_WEA                        <= '1';
+                            PARAMETER_MEM_DINA       <= PARAMETER_MEM_DOUTA(31 downto 16) & NMC_MEM_PORTB_DOUT;
+                            PARAMETER_MEM_WEA        <= '1';
                             NMC_MEM_PORTB_EXT_ACCESS <= '0'; 
-                            BRIDGE_STATE               <= FETCH;
+                            BRIDGE_STATE             <= FETCH;
 
                         when ASSEMBLE_ULEARN_WORD =>
 
