@@ -9,107 +9,91 @@ use xpm.vcomponents.all;
 
 entity OSSNA is
 	generic (
-		-- Users to add parameters here
-        CROSSBAR_MATRIX_DIMENSIONS : integer := 16;
-        SYNAPSE_MEM_DEPTH  : integer := 8192;
-        NEURAL_MEM_DEPTH   : integer := 2048;
-        LEARNING_ENGINE_LUT_DEPTH : integer := 2048;
-        SPIKE_GENERATOR_BUFFER_DEPTH  : integer := 4096;
-		-- User parameters ends
-		-- Do not modify the parameters beyond this line
-
-
-		-- Parameters of Axi Slave Bus Interface AXIL_CONTROLS
-		C_AXIL_CONTROLS_DATA_WIDTH	: integer	:= 32;
-		C_AXIL_CONTROLS_ADDR_WIDTH	: integer	:= 7;
-
-		-- Parameters of Axi Master Bus Interface AXIM_DATA
+        CROSSBAR_MATRIX_DIMENSIONS          : integer := 16;
+        SYNAPSE_MEM_DEPTH                   : integer := 8192;
+        NEURAL_MEM_DEPTH                    : integer := 2048;
+        LEARNING_ENGINE_LUT_DEPTH           : integer := 2048;
+        SPIKE_GENERATOR_BUFFER_DEPTH        : integer := 4096;
+		C_AXIL_CONTROLS_DATA_WIDTH	        : integer := 32;
+		C_AXIL_CONTROLS_ADDR_WIDTH	        : integer := 7;
 		C_AXIM_DATA_TARGET_SLAVE_BASE_ADDR	: std_logic_vector	:= x"40000000";
-		C_AXIM_DATA_BURST_LEN	: integer	:= 16;
-		C_AXIM_DATA_ID_WIDTH	: integer	:= 1;
-		C_AXIM_DATA_ADDR_WIDTH	: integer	:= 32;
-		C_AXIM_DATA_DATA_WIDTH	: integer	:= 32;
-		C_AXIM_DATA_AWUSER_WIDTH	: integer	:= 0;
-		C_AXIM_DATA_ARUSER_WIDTH	: integer	:= 0;
-		C_AXIM_DATA_WUSER_WIDTH	: integer	:= 0;
-		C_AXIM_DATA_RUSER_WIDTH	: integer	:= 0;
-		C_AXIM_DATA_BUSER_WIDTH	: integer	:= 0
+		C_AXIM_DATA_BURST_LEN	            : integer := 16;
+		C_AXIM_DATA_ID_WIDTH	            : integer := 1;
+		C_AXIM_DATA_ADDR_WIDTH	            : integer := 32;
+		C_AXIM_DATA_DATA_WIDTH	            : integer := 32;
+		C_AXIM_DATA_AWUSER_WIDTH            : integer := 0;
+		C_AXIM_DATA_ARUSER_WIDTH            : integer := 0;
+		C_AXIM_DATA_WUSER_WIDTH	            : integer := 0;
+		C_AXIM_DATA_RUSER_WIDTH	            : integer := 0;
+		C_AXIM_DATA_BUSER_WIDTH	            : integer := 0
 	);
 	port (
-		-- Users to add ports here
-        irq                 : out std_logic;
-		-- User ports ends
-		-- Do not modify the ports beyond this line
-
-
-		-- Ports of Axi Slave Bus Interface AXIL_CONTROLS
-		axil_controls_aclk	: in std_logic;
-		axil_controls_aresetn	: in std_logic;
-		axil_controls_awaddr	: in std_logic_vector(C_AXIL_CONTROLS_ADDR_WIDTH-1 downto 0);
-		axil_controls_awprot	: in std_logic_vector(2 downto 0);
-		axil_controls_awvalid	: in std_logic;
-		axil_controls_awready	: out std_logic;
-		axil_controls_wdata	: in std_logic_vector(C_AXIL_CONTROLS_DATA_WIDTH-1 downto 0);
-		axil_controls_wstrb	: in std_logic_vector((C_AXIL_CONTROLS_DATA_WIDTH/8)-1 downto 0);
-		axil_controls_wvalid	: in std_logic;
-		axil_controls_wready	: out std_logic;
-		axil_controls_bresp	: out std_logic_vector(1 downto 0);
-		axil_controls_bvalid	: out std_logic;
-		axil_controls_bready	: in std_logic;
-		axil_controls_araddr	: in std_logic_vector(C_AXIL_CONTROLS_ADDR_WIDTH-1 downto 0);
-		axil_controls_arprot	: in std_logic_vector(2 downto 0);
-		axil_controls_arvalid	: in std_logic;
-		axil_controls_arready	: out std_logic;
-		axil_controls_rdata	: out std_logic_vector(C_AXIL_CONTROLS_DATA_WIDTH-1 downto 0);
-		axil_controls_rresp	: out std_logic_vector(1 downto 0);
-		axil_controls_rvalid	: out std_logic;
-		axil_controls_rready	: in std_logic;
-
-		-- Ports of Axi Master Bus Interface AXIM_DATA
-		axim_data_aclk	: in std_logic;
-		axim_data_aresetn	: in std_logic;
-		axim_data_awid	: out std_logic_vector(C_AXIM_DATA_ID_WIDTH-1 downto 0);
-		axim_data_awaddr	: out std_logic_vector(C_AXIM_DATA_ADDR_WIDTH-1 downto 0);
-		axim_data_awlen	: out std_logic_vector(7 downto 0);
-		axim_data_awsize	: out std_logic_vector(2 downto 0);
-		axim_data_awburst	: out std_logic_vector(1 downto 0);
-		axim_data_awlock	: out std_logic;
-		axim_data_awcache	: out std_logic_vector(3 downto 0);
-		axim_data_awprot	: out std_logic_vector(2 downto 0);
-		axim_data_awqos	: out std_logic_vector(3 downto 0);
-		axim_data_awuser	: out std_logic_vector(C_AXIM_DATA_AWUSER_WIDTH-1 downto 0);
-		axim_data_awvalid	: out std_logic;
-		axim_data_awready	: in std_logic;
-		axim_data_wdata	: out std_logic_vector(C_AXIM_DATA_DATA_WIDTH-1 downto 0);
-		axim_data_wstrb	: out std_logic_vector(C_AXIM_DATA_DATA_WIDTH/8-1 downto 0);
-		axim_data_wlast	: out std_logic;
-		axim_data_wuser	: out std_logic_vector(C_AXIM_DATA_WUSER_WIDTH-1 downto 0);
-		axim_data_wvalid	: out std_logic;
-		axim_data_wready	: in std_logic;
-		axim_data_bid	: in std_logic_vector(C_AXIM_DATA_ID_WIDTH-1 downto 0);
-		axim_data_bresp	: in std_logic_vector(1 downto 0);
-		axim_data_buser	: in std_logic_vector(C_AXIM_DATA_BUSER_WIDTH-1 downto 0);
-		axim_data_bvalid	: in std_logic;
-		axim_data_bready	: out std_logic;
-		axim_data_arid	: out std_logic_vector(C_AXIM_DATA_ID_WIDTH-1 downto 0);
-		axim_data_araddr	: out std_logic_vector(C_AXIM_DATA_ADDR_WIDTH-1 downto 0);
-		axim_data_arlen	: out std_logic_vector(7 downto 0);
-		axim_data_arsize	: out std_logic_vector(2 downto 0);
-		axim_data_arburst	: out std_logic_vector(1 downto 0);
-		axim_data_arlock	: out std_logic;
-		axim_data_arcache	: out std_logic_vector(3 downto 0);
-		axim_data_arprot	: out std_logic_vector(2 downto 0);
-		axim_data_arqos	: out std_logic_vector(3 downto 0);
-		axim_data_aruser	: out std_logic_vector(C_AXIM_DATA_ARUSER_WIDTH-1 downto 0);
-		axim_data_arvalid	: out std_logic;
-		axim_data_arready	: in std_logic;
-		axim_data_rid	: in std_logic_vector(C_AXIM_DATA_ID_WIDTH-1 downto 0);
-		axim_data_rdata	: in std_logic_vector(C_AXIM_DATA_DATA_WIDTH-1 downto 0);
-		axim_data_rresp	: in std_logic_vector(1 downto 0);
-		axim_data_rlast	: in std_logic;
-		axim_data_ruser	: in std_logic_vector(C_AXIM_DATA_RUSER_WIDTH-1 downto 0);
-		axim_data_rvalid	: in std_logic;
-		axim_data_rready	: out std_logic
+        irq                   : out std_logic;
+		axil_controls_aclk	  : in  std_logic;
+		axil_controls_aresetn : in  std_logic;
+		axil_controls_awaddr  : in  std_logic_vector(C_AXIL_CONTROLS_ADDR_WIDTH-1 downto 0);
+		axil_controls_awprot  : in  std_logic_vector(2 downto 0);
+		axil_controls_awvalid : in  std_logic;
+		axil_controls_awready : out std_logic;
+		axil_controls_wdata	  : in  std_logic_vector(C_AXIL_CONTROLS_DATA_WIDTH-1 downto 0);
+		axil_controls_wstrb	  : in  std_logic_vector((C_AXIL_CONTROLS_DATA_WIDTH/8)-1 downto 0);
+		axil_controls_wvalid  : in  std_logic;
+		axil_controls_wready  : out std_logic;
+		axil_controls_bresp	  : out std_logic_vector(1 downto 0);
+		axil_controls_bvalid  : out std_logic;
+		axil_controls_bready  : in  std_logic;
+		axil_controls_araddr  : in  std_logic_vector(C_AXIL_CONTROLS_ADDR_WIDTH-1 downto 0);
+		axil_controls_arprot  : in  std_logic_vector(2 downto 0);
+		axil_controls_arvalid : in  std_logic;
+		axil_controls_arready : out std_logic;
+		axil_controls_rdata	  : out std_logic_vector(C_AXIL_CONTROLS_DATA_WIDTH-1 downto 0);
+		axil_controls_rresp	  : out std_logic_vector(1 downto 0);
+		axil_controls_rvalid  : out std_logic;
+		axil_controls_rready  : in  std_logic;
+		axim_data_aclk   	  : in  std_logic;
+		axim_data_aresetn	  : in  std_logic;
+		axim_data_awid	      : out std_logic_vector(C_AXIM_DATA_ID_WIDTH-1 downto 0);
+		axim_data_awaddr	  : out std_logic_vector(C_AXIM_DATA_ADDR_WIDTH-1 downto 0);
+		axim_data_awlen	      : out std_logic_vector(7 downto 0);
+		axim_data_awsize	  : out std_logic_vector(2 downto 0);
+		axim_data_awburst	  : out std_logic_vector(1 downto 0);
+		axim_data_awlock	  : out std_logic;
+		axim_data_awcache	  : out std_logic_vector(3 downto 0);
+		axim_data_awprot 	  : out std_logic_vector(2 downto 0);
+		axim_data_awqos  	  : out std_logic_vector(3 downto 0);
+		axim_data_awuser	  : out std_logic_vector(C_AXIM_DATA_AWUSER_WIDTH-1 downto 0);
+		axim_data_awvalid	  : out std_logic;
+		axim_data_awready	  : in  std_logic;
+		axim_data_wdata	      : out std_logic_vector(C_AXIM_DATA_DATA_WIDTH-1 downto 0);
+		axim_data_wstrb	      : out std_logic_vector(C_AXIM_DATA_DATA_WIDTH/8-1 downto 0);
+		axim_data_wlast	      : out std_logic;
+		axim_data_wuser	      : out std_logic_vector(C_AXIM_DATA_WUSER_WIDTH-1 downto 0);
+		axim_data_wvalid	  : out std_logic;
+		axim_data_wready	  : in  std_logic;
+		axim_data_bid	      : in  std_logic_vector(C_AXIM_DATA_ID_WIDTH-1 downto 0);
+		axim_data_bresp	      : in  std_logic_vector(1 downto 0);
+		axim_data_buser	      : in  std_logic_vector(C_AXIM_DATA_BUSER_WIDTH-1 downto 0);
+		axim_data_bvalid	  : in  std_logic;
+		axim_data_bready	  : out std_logic;
+		axim_data_arid	      : out std_logic_vector(C_AXIM_DATA_ID_WIDTH-1 downto 0);
+		axim_data_araddr	  : out std_logic_vector(C_AXIM_DATA_ADDR_WIDTH-1 downto 0);
+		axim_data_arlen	      : out std_logic_vector(7 downto 0);
+		axim_data_arsize	  : out std_logic_vector(2 downto 0);
+		axim_data_arburst	  : out std_logic_vector(1 downto 0);
+		axim_data_arlock	  : out std_logic;
+		axim_data_arcache	  : out std_logic_vector(3 downto 0);
+		axim_data_arprot	  : out std_logic_vector(2 downto 0);
+		axim_data_arqos	      : out std_logic_vector(3 downto 0);
+		axim_data_aruser	  : out std_logic_vector(C_AXIM_DATA_ARUSER_WIDTH-1 downto 0);
+		axim_data_arvalid	  : out std_logic;
+		axim_data_arready	  : in  std_logic;
+		axim_data_rid	      : in  std_logic_vector(C_AXIM_DATA_ID_WIDTH-1 downto 0);
+		axim_data_rdata	      : in  std_logic_vector(C_AXIM_DATA_DATA_WIDTH-1 downto 0);
+		axim_data_rresp	      : in  std_logic_vector(1 downto 0);
+		axim_data_rlast	      : in  std_logic;
+		axim_data_ruser	      : in  std_logic_vector(C_AXIM_DATA_RUSER_WIDTH-1 downto 0);
+		axim_data_rvalid	  : in  std_logic;
+		axim_data_rready	  : out std_logic
 	);
 end OSSNA;
 
@@ -127,9 +111,9 @@ architecture arch_imp of OSSNA is
 		C_S_AXI_ADDR_WIDTH	: integer	:= 7
 		);
 		port (
-        DMA_START_READ                 : out  std_logic;  
-        DMA_START_WRITE                : out  std_logic;  
-        DMA_RESET_SOFT                 : out  std_logic;  
+        DMA_START_READ           : out std_logic;  
+        DMA_START_WRITE          : out std_logic;  
+        DMA_RESET_SOFT           : out std_logic;  
         TARGET_SELECT            : out std_logic;                    
         FIFO_TYPE                : out std_logic;                   
         BYTE_PER_WORD            : out std_logic_vector(31 downto 0);  
