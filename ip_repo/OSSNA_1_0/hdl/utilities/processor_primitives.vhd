@@ -123,6 +123,7 @@ component BRIDGE is
         NMC_MEM_PORTB_DOUT           : in  std_logic_vector(15 downto 0);
 
         NMODEL_FINISHED              : in  std_logic;
+        NMC_OUTPUT_SPIKES_LATCH      : in  std_logic;
 
         SYNAPTIC_MEM_PORTA_MUX       : out std_logic;
         ULEARN_RST                   : out std_logic;

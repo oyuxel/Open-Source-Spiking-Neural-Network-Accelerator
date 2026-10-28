@@ -95,6 +95,23 @@ architecture moth_to_a_flame of OSSNA_CORE is
     signal BARRIER : std_logic;
 
     signal GLOBAL_TIMESTEP_LOOP : std_logic;
+
+    signal ALL_SPIKES_ARRIVED     : std_logic_vector(0 to CROSSBAR_DIMENSION-1 );
+
+    type SSTATES is (LISTENING,CATCHSPIKE);
+      
+    type SPIKE_STATES is array (0 to CROSSBAR_DIMENSION-1) of SSTATES; 
+      
+    signal SPIKE_STATE : SPIKE_STATES;
+
+    constant ARRIVAL : std_logic_vector(0 to CROSSBAR_DIMENSION-1 ) := (others=>'1');
+
+    signal SPIKE_SYNCHRONIZER : std_logic;
+
+    type FIFOSTATES is (WAITINPUT,WRITEFIFO,ARRIVAL_CLEAR);
+    signal FIFOSTATE : FIFOSTATES;
+
+    signal CC_CORE_NMC_SPIKE_OUT_LATCH: std_logic;
     
 begin
 
@@ -165,7 +182,8 @@ begin
         CORE_NMC_XNEVER_BASEADDR              => NMC_XNEVER_BASEADDR,
         CORE_NMC_XNEVER_HIGHADDR              => NMC_XNEVER_HIGHADDR,
         CORE_NMC_SPIKE_OUT                    => CC_CORE_NMC_SPIKE_OUT(i),     
-        CORE_NMC_SPIKE_OUT_VLD                => CC_CORE_NMC_SPIKE_OUT_VLD(i), 
+        CORE_NMC_SPIKE_OUT_VLD                => CC_CORE_NMC_SPIKE_OUT_VLD(i),
+        CORE_NMC_SPIKE_OUT_LATCH              => CC_CORE_NMC_SPIKE_OUT_LATCH,
         
         CORE_NMC_MATH_ERROR                   => CC_CORE_NMC_MATH_ERROR(i),        
         CORE_NMC_MEMORY_VIOLATION             => CC_CORE_NMC_MEMORY_VIOLATION(i)  
@@ -203,6 +221,70 @@ begin
             SYNAPTIC_DATA_WRITE_EN   => CC_CORE_SYNAPTIC_DATA_WRITE_EN
         );
 
+     GENERATE_NMC_SPIKE_LATCH : for k in 0 to CROSSBAR_DIMENSION-1 generate
+
+    NMC_SPIKE_HOOK : process(CLK)
+        begin
+            if(rising_edge(CLK)) then
+                if(RST = '1') then
+                    SPIKE_STATE(k) <= LISTENING ;
+                else
+                    case SPIKE_STATE(k) is
+                        when LISTENING  =>
+                            NMC_SPIKE_OUT(k) <= '0';
+                            if(CC_CORE_NMC_SPIKE_OUT_VLD(k) = '1') then
+                                SPIKE_STATE(k)         <=  CATCHSPIKE;
+                            else
+                                SPIKE_STATE(k)         <=  LISTENING;
+                            end if;
+                        when CATCHSPIKE =>
+                            NMC_SPIKE_OUT(k) <=  CC_CORE_NMC_SPIKE_OUT(k);
+                            ALL_SPIKES_ARRIVED(k)  <=  '1';
+                            if (SPIKE_SYNCHRONIZER = '0') then
+                                SPIKE_STATE(k)         <=  CATCHSPIKE;
+                            else
+                                SPIKE_STATE(k)         <=  LISTENING;
+                                NMC_SPIKE_OUT(k) <=  '0';
+                                ALL_SPIKES_ARRIVED(k)  <=  '0';
+                            end if;                   
+                        when others =>
+                             SPIKE_STATE(k)         <=  LISTENING;    
+                     end case;                        
+                end if;
+            end if;
+        end process NMC_SPIKE_HOOK;
+    end generate GENERATE_NMC_SPIKE_LATCH;
+
+    FIFO_WRCNTROLS : process(CLK)
+        begin
+            if(rising_edge(CLK)) then
+                if(RST = '1') then
+                    FIFOSTATE <= WAITINPUT;
+                else
+                    case FIFOSTATE is
+                        when WAITINPUT =>
+                            SPIKE_SYNCHRONIZER <= '0';
+                            NMC_SPIKE_OUT_VLD <= '0';
+                            if(ALL_SPIKES_ARRIVED = ARRIVAL) then
+                                FIFOSTATE <= WRITEFIFO;
+                            else
+                                FIFOSTATE <= WAITINPUT;
+                            end if;
+                        when WRITEFIFO => 
+                            SPIKE_SYNCHRONIZER <= '1';
+                            NMC_SPIKE_OUT_VLD  <= '1';
+                            FIFOSTATE <= ARRIVAL_CLEAR;  
+                        when ARRIVAL_CLEAR =>
+                            SPIKE_SYNCHRONIZER <= '0';
+                            NMC_SPIKE_OUT_VLD <= '0';
+                            FIFOSTATE <= WAITINPUT; 
+                        when others    =>
+                            FIFOSTATE <= WAITINPUT;
+                        end case;
+                    end if;  
+                end if;    
+    end process FIFO_WRCNTROLS;
+
     EVENT_ACCEPTANCE <= and CC_CORE_EVENT_ACCEPTANCE;
     READ_MAIN_SPIKE_BUFFER <= and CC_CORE_READ_MAIN_SPIKE_BUFFER;
     READ_CIRCULAR_BUFFER <= and CC_CORE_READ_CIRCULAR_BUFFER; 
@@ -210,10 +292,16 @@ begin
     WRITE_OUT_BUFFER <= and CC_CORE_WRITE_OUT_BUFFER;
     WRITE_AUX_BUFFER <= and CC_CORE_WRITE_AUX_BUFFER;
 
+    CC_CORE_NMC_SPIKE_OUT_LATCH <= and ALL_SPIKES_ARRIVED;
+
     BARRIER <= and CC_BARRIER_SYNC_OUT;
 
-    GLOBAL_TIMESTEP_LOOP <= (and CC_GLOBAL_TIMESTEP_COMPLETE) or GLOBAL_TIMESTEP_START;
+   -- GLOBAL_TIMESTEP_LOOP <= (and CC_GLOBAL_TIMESTEP_COMPLETE) or GLOBAL_TIMESTEP_START;
 
+    GLOBAL_TIMESTEP_LOOP <= GLOBAL_TIMESTEP_START;
     GLOBAL_TIMESTEP_COMPLETE <= (and CC_GLOBAL_TIMESTEP_COMPLETE);
+
+    NMC_MATH_ERROR <= or CC_CORE_NMC_MATH_ERROR       ; 
+    NMC_MEMORY_VIOLATION    <= or CC_CORE_NMC_MEMORY_VIOLATION ; 
 
 end moth_to_a_flame;

@@ -70,6 +70,7 @@ entity COMPUTATIONAL_CORE is
         CORE_NMC_XNEVER_HIGHADDR              : in  std_logic_vector(9 downto 0);
         CORE_NMC_SPIKE_OUT                    : out std_logic;
         CORE_NMC_SPIKE_OUT_VLD                : out std_logic;
+        CORE_NMC_SPIKE_OUT_LATCH              : in  std_logic;
         
         CORE_NMC_MATH_ERROR                   : out std_logic;
         CORE_NMC_MEMORY_VIOLATION             : out std_logic
@@ -272,6 +273,7 @@ begin
         NMC_MEM_PORTB_DOUT           => BRIDGE_NMC_MEM_PORTB_DOUT           ,
 
         NMODEL_FINISHED              => BRIDGE_NMODEL_FINISHED ,
+        NMC_OUTPUT_SPIKES_LATCH      => CORE_NMC_SPIKE_OUT_LATCH  ,
 
         SYNAPTIC_MEM_PORTA_MUX       => BRIDGE_SYNAPTIC_MEM_PORTA_MUX       ,
         ULEARN_RST                   => BRIDGE_ULEARN_RST                   ,
