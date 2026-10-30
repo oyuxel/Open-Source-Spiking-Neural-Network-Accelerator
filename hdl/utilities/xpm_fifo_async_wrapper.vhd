@@ -1,45 +1,34 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-
 library xpm;
 use xpm.vcomponents.all;
 
 entity xpm_fifo_async_wrapper is
     generic (
-        -- Genel Yapılandırma
-        FIFO_MEMORY_TYPE    : string  := "auto";    -- "auto", "block", "distributed", "ultra"
-        FIFO_WRITE_DEPTH    : integer := 2048;      -- Derinlik (2'nin kuvveti olmalı: 16-4194304)
-        WRITE_DATA_WIDTH    : integer := 32;        -- Yazma veri genişliği
-        READ_DATA_WIDTH     : integer := 32;        -- Okuma veri genişliği
-        READ_MODE           : string  := "std";     -- "std" (Standart) veya "fwft" (First-Word Fall-Through)
-        FIFO_READ_LATENCY   : integer := 1;         -- "std" için >= 1, "fwft" için genellikle 0
-        
-        -- Eşik ve Sayıcı Ayarları
-        PROG_EMPTY_THRESH   : integer := 10;        -- Prog empty eşik değeri
-        PROG_FULL_THRESH    : integer := 10;        -- Prog full eşik değeri
-        WR_DATA_COUNT_WIDTH : integer := 1;         -- wr_data_count bit genişliği (log2(depth)+1)
-        RD_DATA_COUNT_WIDTH : integer := 1;         -- rd_data_count bit genişliği
-        
-        -- Saat ve Senkronizasyon Ayarları
-        CDC_SYNC_STAGES     : integer := 2;         -- Senkronizasyon kademe sayısı (2-8)
-        RELATED_CLOCKS      : integer := 0;         -- 0: Bağımsız saatler, 1: Frekans ilişkili saatler
-        
-        -- Gelişmiş Özellikler
-        CASCADE_HEIGHT      : integer := 0;         -- 0: Otomatik cascade
-        DOUT_RESET_VALUE    : string  := "0";       -- Reset anındaki dout değeri
-        ECC_MODE            : string  := "no_ecc";  -- "no_ecc", "en_ecc"
-        FULL_RESET_VALUE    : integer := 0;         -- Reset anında full flag durumu (0 veya 1)
-        SIM_ASSERT_CHK      : integer := 0;         -- Simülasyon uyarı mesajları (0: kapalı, 1: açık)
-        USE_ADV_FEATURES    : string  := "0707";    -- Flag ve sayıcı portlarının açılması için hex maske
-        WAKEUP_TIME         : integer := 0          -- Dinamik güç tasarrufu uyanma süresi
+        FIFO_MEMORY_TYPE    : string  := "auto";    
+        FIFO_WRITE_DEPTH    : integer := 2048;      
+        WRITE_DATA_WIDTH    : integer := 32;        
+        READ_DATA_WIDTH     : integer := 32;        
+        READ_MODE           : string  := "std";     
+        FIFO_READ_LATENCY   : integer := 1;         
+        PROG_EMPTY_THRESH   : integer := 10;        
+        PROG_FULL_THRESH    : integer := 10;        
+        WR_DATA_COUNT_WIDTH : integer := 1;         
+        RD_DATA_COUNT_WIDTH : integer := 1;         
+        CDC_SYNC_STAGES     : integer := 2;         
+        RELATED_CLOCKS      : integer := 0;         
+        CASCADE_HEIGHT      : integer := 0;         
+        DOUT_RESET_VALUE    : string  := "0";       
+        ECC_MODE            : string  := "no_ecc";  
+        FULL_RESET_VALUE    : integer := 0;         
+        SIM_ASSERT_CHK      : integer := 0;         
+        USE_ADV_FEATURES    : string  := "0707";    
+        WAKEUP_TIME         : integer := 0          
     );
     port (
-        -- Reset ve Güç Kontrolü
         rst           : in  std_logic;
         sleep         : in  std_logic := '0';
-        
-        -- Yazma Domaini (wr_clk)
         wr_clk        : in  std_logic;
         wr_en         : in  std_logic;
         din           : in  std_logic_vector(WRITE_DATA_WIDTH - 1 downto 0);
@@ -50,8 +39,6 @@ entity xpm_fifo_async_wrapper is
         wr_ack        : out std_logic;
         wr_rst_busy   : out std_logic;
         wr_data_count : out std_logic_vector(WR_DATA_COUNT_WIDTH - 1 downto 0);
-        
-        -- Okuma Domaini (rd_clk)
         rd_clk        : in  std_logic;
         rd_en         : in  std_logic;
         dout          : out std_logic_vector(READ_DATA_WIDTH - 1 downto 0);
@@ -62,8 +49,6 @@ entity xpm_fifo_async_wrapper is
         data_valid    : out std_logic;
         rd_rst_busy   : out std_logic;
         rd_data_count : out std_logic_vector(RD_DATA_COUNT_WIDTH - 1 downto 0);
-        
-        -- Hata Düzeltme / Enjeksiyon (Opsiyonel)
         injectsbiterr : in  std_logic := '0';
         injectdbiterr : in  std_logic := '0';
         sbiterr       : out std_logic;
@@ -101,7 +86,6 @@ begin
         rst           => rst,
         sleep         => sleep,
         
-        -- Yazma Arayüzü
         wr_clk        => wr_clk,
         wr_en         => wr_en,
         din           => din,
@@ -113,7 +97,6 @@ begin
         wr_rst_busy   => wr_rst_busy,
         wr_data_count => wr_data_count,
         
-        -- Okuma Arayüzü
         rd_clk        => rd_clk,
         rd_en         => rd_en,
         dout          => dout,
@@ -125,7 +108,6 @@ begin
         rd_rst_busy   => rd_rst_busy,
         rd_data_count => rd_data_count,
         
-        -- ECC / Hata Portları
         injectsbiterr => injectsbiterr,
         injectdbiterr => injectdbiterr,
         sbiterr       => sbiterr,
