@@ -15,6 +15,7 @@ entity OSSNA_CORE is
     Port ( 
             CLK                              : in  std_logic; 
             RST                              : in  std_logic;
+            BREAK_TIMESTEP_LOOP              : in  std_logic;
             NETWORK_START_ADDRESS            : in  std_logic_vector(31 downto 0);
             GLOBAL_TIMESTEP_START            : in  std_logic;
             GLOBAL_TIMESTEP_COMPLETE         : out std_logic;
@@ -296,9 +297,9 @@ begin
 
     BARRIER <= and CC_BARRIER_SYNC_OUT;
 
-   -- GLOBAL_TIMESTEP_LOOP <= (and CC_GLOBAL_TIMESTEP_COMPLETE) or GLOBAL_TIMESTEP_START;
+    GLOBAL_TIMESTEP_LOOP <= (and CC_GLOBAL_TIMESTEP_COMPLETE) or GLOBAL_TIMESTEP_START when BREAK_TIMESTEP_LOOP = '0' else
+                            '0';
 
-    GLOBAL_TIMESTEP_LOOP <= GLOBAL_TIMESTEP_START;
     GLOBAL_TIMESTEP_COMPLETE <= (and CC_GLOBAL_TIMESTEP_COMPLETE);
 
     NMC_MATH_ERROR <= or CC_CORE_NMC_MATH_ERROR       ; 
