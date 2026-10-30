@@ -102,6 +102,8 @@ architecture wind_of_change of CROSSBAR_FABRIC is
     signal LOCK_COUNT      : SYNCNTR(0 to COLUMN-1);
     signal LOCK_COUNT_SNAP : SYNCNTR(0 to COLUMN-1);
 
+    signal SYNAPTIC_DATA_WRITE_EN_REG : std_logic_vector(0 to COLUMN-1);
+
 begin
 
     INVERSE_SPIKEVECTOR <= SPIKE_IN;
@@ -505,9 +507,9 @@ begin
                                             
                             end case;
 
-                            SYNAPTIC_DATA_WRITE_EN(i) <= COLUMN_INTERNAL_FIFO_RDEN(i);
+                            SYNAPTIC_DATA_WRITE_EN_REG(i) <= COLUMN_INTERNAL_FIFO_RDEN(i);
 
-                            if SYNAPTIC_DATA_WRITE_EN(i) = '1' then
+                            if SYNAPTIC_DATA_WRITE_EN_REG(i) = '1' then
 
                                 COLUMN_ADDR(i) <= COLUMN_ADDR(i) + 1;
 
@@ -521,6 +523,8 @@ begin
                 end if;
 
         end process POST_SYNAPTIC_OUT;
+
+        SYNAPTIC_DATA_WRITE_EN(i) <= SYNAPTIC_DATA_WRITE_EN_REG(i);
     
   end generate POSTSYN_OUT_GEN;
 
