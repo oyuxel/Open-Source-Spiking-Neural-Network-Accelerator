@@ -44,12 +44,13 @@ entity DATA_MUX is
         LEARN_LUT_DIN               : out  std_logic_vector(7 downto 0);
         LEARN_LUT_ADDR              : out  std_logic_vector(LENGINE_LUT_AWIDTH-1 downto 0);
         LEARN_LUT_EN                : out  std_logic;
+        LEARN_LUT_WREN              : out  std_logic;
         -- PARAMETER MEMORY INTERFACE SELECTION
-        PARAM_MEM_DIN               : out  PARAMMEMDATA(0 to CROSSBAR_COL_WIDTH-1);
-        PARAM_MEM_DADDR             : out  PARAMMEMADDR(0 to CROSSBAR_COL_WIDTH-1);
+        PARAM_MEM_DIN               : out  NEURALMEMDATA(0 to CROSSBAR_COL_WIDTH-1);
+        PARAM_MEM_DADDR             : out  NEURALMEMADDR(0 to CROSSBAR_COL_WIDTH-1);
         PARAM_MEM_EN                : out  std_logic_vector(0 to CROSSBAR_COL_WIDTH-1); 
         PARAM_MEM_WREN              : out  std_logic_vector(0 to CROSSBAR_COL_WIDTH-1); 
-        PARAM_MEM_DOUT              : in   PARAMMEMDATA(0 to CROSSBAR_COL_WIDTH-1);
+        PARAM_MEM_DOUT              : in   NEURALMEMDATA(0 to CROSSBAR_COL_WIDTH-1);
         -- D2S INPUT
         D2S_DATA_IN                 : out  std_logic_vector(31 downto 0);
         D2S_DATA_IN_VLD             : out  std_logic;
@@ -122,7 +123,8 @@ begin
     -- ==========================================
     LEARN_LUT_DIN  <= BRAM_DIN(7 downto 0) when SELECT_SLAVE = x"00000005" else (others=>'0');
     LEARN_LUT_ADDR <= BRAM_ADDR(LENGINE_LUT_AWIDTH-1 downto 0) when SELECT_SLAVE = x"00000005" else (others=>'0');
-    LEARN_LUT_EN   <= '1'                  when SELECT_SLAVE = x"00000005" else '0';
+    LEARN_LUT_EN   <= '1'       when SELECT_SLAVE = x"00000005" else '0';
+    LEARN_LUT_WREN  <= BRAM_WE               when SELECT_SLAVE = x"00000005" else '0';
 
     BRAM_DOUT <= BRAM_DOUT_INTERNAL;
 
