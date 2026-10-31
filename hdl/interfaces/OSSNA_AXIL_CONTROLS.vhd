@@ -22,52 +22,47 @@ entity OSSNA_AXIL_CONTROLS is
 	port (
 		-- Users to add ports here
 		-- Data Interface Control Ports
-	    DMA_START_READ           : out  std_logic;  
-        DMA_START_WRITE          : out  std_logic;  
-        DMA_RESET_SOFT           : out  std_logic;  
-        TARGET_SELECT            : out std_logic;                    
-        FIFO_TYPE                : out std_logic;                   
-        BYTE_PER_WORD            : out std_logic_vector(31 downto 0);  
-        TOTAL_BYTES              : out std_logic_vector(31 downto 0);
-        TOTAL_WORDS              : out std_logic_vector(31 downto 0); 
-        BRAM_READ_DELAY          : out std_logic_vector(31 downto 0); 
-        BRAM_BASEADDR            : out std_logic_vector(31 downto 0);
-        DDR_BASEADDR             : out std_logic_vector(31 downto 0);
-        TARGET_READ_DONE         : in  std_logic;
-        TARGET_WRITE_DONE        : in  std_logic;
-        TARGET_READ_ERROR        : in  std_logic;
-        TARGET_WRITE_ERROR       : in  std_logic;
+	    DMA_START_READ             : out std_logic;  
+        DMA_START_WRITE            : out std_logic;  
+        DMA_RESET_SOFT             : out std_logic;  
+        TARGET_SELECT              : out std_logic;                    
+        FIFO_TYPE                  : out std_logic;                   
+        BYTE_PER_WORD              : out std_logic_vector(31 downto 0);  
+        TOTAL_BYTES                : out std_logic_vector(31 downto 0);
+        TOTAL_WORDS                : out std_logic_vector(31 downto 0); 
+        BRAM_READ_DELAY            : out std_logic_vector(31 downto 0); 
+        BRAM_BASEADDR              : out std_logic_vector(31 downto 0);
+        DDR_BASEADDR               : out std_logic_vector(31 downto 0);
 		-- Data Mux Control Ports
-		SELECT_SLAVE             : out std_logic_vector(31 downto 0);
+		SELECT_SLAVE               : out std_logic_vector(31 downto 0);
+		-- Spike Buffer External Access Muxes
+		AUX_BUFFER_MUX             : out std_logic;
 		-- Data Converter Control Ports
-		INPUT_SPIKE_MUX          : out std_logic;
-		D2S_RESET                : out std_logic;
-        CONVMODE                 : out std_logic_vector(1  downto 0);
-        TIME_WIND                : out std_logic_vector(31 downto 0);
-        SEED                     : out std_logic_vector(31 downto 0);
-        DATA_COUNT               : out std_logic_vector(31 downto 0);
-        CONV_DONE                : in  std_logic;
-		-- Snapshot Control Ports
-		SNAPSHOT_TIMESTEP_COUNTER: out std_logic_vector(31 downto 0);
-		CLEAR_SNAPSHOT_INTERRUPT : out std_logic;
-		RESET_SNAPSHOT           : out std_logic;
+		D2S_RESET                  : out std_logic;
+		INPUT_SPIKE_MUX            : out std_logic;
+        CONVMODE                   : out std_logic_vector(1  downto 0);
+        TIME_WIND                  : out std_logic_vector(31 downto 0);
+        SEED                       : out std_logic_vector(31 downto 0);
+        DATA_COUNT                 : out std_logic_vector(31 downto 0);
+		-- Interrupt Controller Ports
+		IRQ_RESET                  : out std_logic;
+		IRQ_ACTIVE_INTERRUPTS      : out std_logic_vector(7 downto 0);
+		IRQ_TIMESTEP_COUNTER_LIMIT : out std_logic_vector(31 downto 0);
+		IRQ_CLEAR_INTERRUPT        : out std_logic_vector(7 downto 0);
+		IRQ_INTERRUPT_TYPE         : in  std_logic_vector(7 downto 0);
 		-- Core Control Ports
-        SP_RESET                 : out std_logic;
-        NETWORK_START_ADDRESS    : out std_logic_vector(31 downto 0);
-        TIMESTEP_STARTED         : out std_logic;
-        TIMESTEP_COMPLETED       : in  std_logic;
-        DISABLE_LEARNING_ENGINES : out std_logic;
-        SYNAPSE_ROUTE            : out std_logic; 
-        NMC_XNEVER_BASE          : out std_logic_vector(9 downto 0);
-        NMC_XNEVER_HIGH          : out std_logic_vector(9 downto 0);
-        NMC_PMODE_SWITCH         : out std_logic;  
-        NMC_MATH_ERROR_VEC       : in  std_logic; 
-        NMC_MEM_VIOLATION_VEC    : in  std_logic;	
+        CORE_RESET                 : out std_logic;
+        NETWORK_START_ADDRESS      : out std_logic_vector(31 downto 0);
+        TIMESTEP_STARTED           : out std_logic;
+        SYNAPTIC_MEMORY_EXT_ACCESS : out std_logic; 
+        NMC_XNEVER_BASE            : out std_logic_vector(9 downto 0);
+        NMC_XNEVER_HIGH            : out std_logic_vector(9 downto 0);
+        NMC_EXT_ACCESS             : out std_logic;  
 		-- Buffer Controls
-		FLUSH_MAIN_BUFFER        : out std_logic;
-		FLUSH_AUX_BUFFER         : out std_logic;
-		FLUSH_CIRCULAR_BUFFER    : out std_logic;
-		FLUSH_OUT_BUFFER      	 : out std_logic;
+		FLUSH_MAIN_BUFFER          : out std_logic;
+		FLUSH_AUX_BUFFER           : out std_logic;
+		FLUSH_CIRCULAR_BUFFER      : out std_logic;
+		FLUSH_OUT_BUFFER      	   : out std_logic;
 		-- User ports ends
 		-- Do not modify the ports beyond this line
 
@@ -233,51 +228,42 @@ begin
     BRAM_BASEADDR   <= slv_reg12;
     DDR_BASEADDR    <= slv_reg13;
 
-    slv_reg14(0)    <= TARGET_READ_DONE;
-    slv_reg14(1)    <= TARGET_WRITE_DONE;
-    slv_reg14(2)    <= TARGET_READ_ERROR;
-    slv_reg14(3)    <= TARGET_WRITE_ERROR;
-	slv_reg14(C_S_AXI_DATA_WIDTH-1 downto 4) <= (others=>'0');	
-
 	-- Data-2-Spike Control & Status Registers
 
+	D2S_RESET       <= slv_reg14(0);
+    CONVMODE        <= slv_reg14(2 downto 1); 
+	TIME_WIND       <= slv_reg15;  
+    SEED            <= slv_reg16;  
+    DATA_COUNT      <= slv_reg17; 
 
-	D2S_RESET       <= slv_reg15(0);
-    CONVMODE        <= slv_reg15(2 downto 1); 
-	TIME_WIND       <= slv_reg16;  
-    SEED            <= slv_reg17;  
-    DATA_COUNT      <= slv_reg18; 
+	IRQ_ACTIVE_INTERRUPTS <= slv_reg18(7 downto 0); 
+	IRQ_RESET             <= slv_reg18(16);
 
-	slv_reg19(0)    <= CONV_DONE;
+	IRQ_CLEAR_INTERRUPT   <= slv_reg19(7 downto 0); 
+
+	IRQ_TIMESTEP_COUNTER_LIMIT   <= slv_reg20; 
+
+	slv_reg21(7 downto 0) <= IRQ_INTERRUPT_TYPE;
+	slv_reg21(C_S_AXI_DATA_WIDTH-1 downto 8) <= (others=>'0');
 
 	-- Core IP Control & Status Registers
 
-	NMC_XNEVER_BASE(9 downto 0) <= slv_reg20(9 downto 0);
-    NMC_XNEVER_HIGH(9 downto 0) <= slv_reg20(25 downto 16);
+	NMC_XNEVER_BASE <= slv_reg22(9 downto 0);
+    NMC_XNEVER_HIGH <= slv_reg22(25 downto 16);
 
-	SYNAPSE_ROUTE				<= slv_reg21(0); 
-	NMC_PMODE_SWITCH			<= slv_reg21(1); 
+	NETWORK_START_ADDRESS <= slv_reg23;
 
-	NETWORK_START_ADDRESS       <= slv_reg22;  
-	DISABLE_LEARNING_ENGINES	<= slv_reg23(0); 
-	INPUT_SPIKE_MUX             <= slv_reg23(1);    
-	TIMESTEP_STARTED			<= slv_reg23(2); 
+  	CORE_RESET                 <= slv_reg24(0);
+    TIMESTEP_STARTED           <= slv_reg24(1);
+    SYNAPTIC_MEMORY_EXT_ACCESS <= slv_reg24(2); 
+    NMC_EXT_ACCESS             <= slv_reg24(3);  
+	FLUSH_MAIN_BUFFER          <= slv_reg24(4);
+	FLUSH_AUX_BUFFER           <= slv_reg24(5);
+	FLUSH_CIRCULAR_BUFFER      <= slv_reg24(6);
+	FLUSH_OUT_BUFFER      	   <= slv_reg24(7);
+	INPUT_SPIKE_MUX            <= slv_reg24(8);
 
-	SP_RESET                    <= slv_reg24(0); 
-	FLUSH_MAIN_BUFFER           <= slv_reg24(1); 
-	FLUSH_AUX_BUFFER            <= slv_reg24(2); 
-	FLUSH_CIRCULAR_BUFFER       <= slv_reg24(3); 
-	FLUSH_OUT_BUFFER            <= slv_reg24(4); 
-
-	CLEAR_SNAPSHOT_INTERRUPT    <= slv_reg24(5); 
-	RESET_SNAPSHOT              <= slv_reg24(6); 
-
-    slv_reg25(0)                <= TIMESTEP_COMPLETED;
-    slv_reg25(1)                <= NMC_MATH_ERROR_VEC; 
-    slv_reg25(2)                <= NMC_MEM_VIOLATION_VEC;	
-	slv_reg25(C_S_AXI_DATA_WIDTH-1 downto 3) <= (others=>'0');	
-	
-	SNAPSHOT_TIMESTEP_COUNTER   <= slv_reg26; 
+	AUX_BUFFER_MUX             <= slv_reg24(16);
 
 	-- I/O Connections assignments
 
@@ -377,18 +363,18 @@ begin
 	      slv_reg11 <= (others => '0');
 	      slv_reg12 <= (others => '0');
 	      slv_reg13 <= (others => '0');
-	      --slv_reg14 <= (others => '0');
+	      slv_reg14 <= (others => '0');
 	      slv_reg15 <= (others => '0');
 	      slv_reg16 <= (others => '0');
 	      slv_reg17 <= (others => '0');
 	      slv_reg18 <= (others => '0');
-	      --slv_reg19 <= (others => '0');
+	      slv_reg19 <= (others => '0');
 	      slv_reg20 <= (others => '0');
-	      slv_reg21 <= (others => '0');
+	      --slv_reg21 <= (others => '0');
 	      slv_reg22 <= (others => '0');
 	      slv_reg23 <= (others => '0');
 	      slv_reg24 <= (others => '0');
-	      --slv_reg25 <= (others => '0');
+	      slv_reg25 <= (others => '0');
 	      slv_reg26 <= (others => '0');
 	      slv_reg27 <= (others => '0');
 	      slv_reg28 <= (others => '0');
@@ -510,14 +496,14 @@ begin
 	                slv_reg13(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
 	              end if;
 	            end loop;
-	          --when b"01110" =>
-	          --  for byte_index in 0 to (C_S_AXI_DATA_WIDTH/8-1) loop
-	          --    if ( S_AXI_WSTRB(byte_index) = '1' ) then
-	          --      -- Respective byte enables are asserted as per write strobes                   
-	          --      -- slave registor 14
-	          --      slv_reg14(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
-	          --    end if;
-	          --  end loop;
+	          when b"01110" =>
+	            for byte_index in 0 to (C_S_AXI_DATA_WIDTH/8-1) loop
+	              if ( S_AXI_WSTRB(byte_index) = '1' ) then
+	                -- Respective byte enables are asserted as per write strobes                   
+	                -- slave registor 14
+	                slv_reg14(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
+	              end if;
+	            end loop;
 	          when b"01111" =>
 	            for byte_index in 0 to (C_S_AXI_DATA_WIDTH/8-1) loop
 	              if ( S_AXI_WSTRB(byte_index) = '1' ) then
@@ -550,14 +536,14 @@ begin
 	                slv_reg18(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
 	              end if;
 	            end loop;
-	          --when b"10011" =>
-	          --  for byte_index in 0 to (C_S_AXI_DATA_WIDTH/8-1) loop
-	          --    if ( S_AXI_WSTRB(byte_index) = '1' ) then
-	          --      -- Respective byte enables are asserted as per write strobes                   
-	          --      -- slave registor 19
-	          --      slv_reg19(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
-	          --    end if;
-	          --  end loop;
+	          when b"10011" =>
+	            for byte_index in 0 to (C_S_AXI_DATA_WIDTH/8-1) loop
+	              if ( S_AXI_WSTRB(byte_index) = '1' ) then
+	                -- Respective byte enables are asserted as per write strobes                   
+	                -- slave registor 19
+	                slv_reg19(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
+	              end if;
+	            end loop;
 	          when b"10100" =>
 	            for byte_index in 0 to (C_S_AXI_DATA_WIDTH/8-1) loop
 	              if ( S_AXI_WSTRB(byte_index) = '1' ) then
@@ -566,14 +552,14 @@ begin
 	                slv_reg20(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
 	              end if;
 	            end loop;
-	          when b"10101" =>
-	            for byte_index in 0 to (C_S_AXI_DATA_WIDTH/8-1) loop
-	              if ( S_AXI_WSTRB(byte_index) = '1' ) then
-	                -- Respective byte enables are asserted as per write strobes                   
-	                -- slave registor 21
-	                slv_reg21(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
-	              end if;
-	            end loop;
+	          --when b"10101" =>
+	          --  for byte_index in 0 to (C_S_AXI_DATA_WIDTH/8-1) loop
+	          --    if ( S_AXI_WSTRB(byte_index) = '1' ) then
+	          --      -- Respective byte enables are asserted as per write strobes                   
+	          --      -- slave registor 21
+	          --      slv_reg21(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
+	          --    end if;
+	          --  end loop;
 	          when b"10110" =>
 	            for byte_index in 0 to (C_S_AXI_DATA_WIDTH/8-1) loop
 	              if ( S_AXI_WSTRB(byte_index) = '1' ) then
@@ -598,14 +584,14 @@ begin
 	                slv_reg24(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
 	              end if;
 	            end loop;
-	          --when b"11001" =>
-	          --  for byte_index in 0 to (C_S_AXI_DATA_WIDTH/8-1) loop
-	          --    if ( S_AXI_WSTRB(byte_index) = '1' ) then
-	          --      -- Respective byte enables are asserted as per write strobes                   
-	          --      -- slave registor 25
-	          --      slv_reg25(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
-	          --    end if;
-	          --  end loop;
+	          when b"11001" =>
+	            for byte_index in 0 to (C_S_AXI_DATA_WIDTH/8-1) loop
+	              if ( S_AXI_WSTRB(byte_index) = '1' ) then
+	                -- Respective byte enables are asserted as per write strobes                   
+	                -- slave registor 25
+	                slv_reg25(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
+	              end if;
+	            end loop;
 	          when b"11010" =>
 	            for byte_index in 0 to (C_S_AXI_DATA_WIDTH/8-1) loop
 	              if ( S_AXI_WSTRB(byte_index) = '1' ) then
@@ -669,17 +655,17 @@ begin
 	            slv_reg11 <= slv_reg11;
 	            slv_reg12 <= slv_reg12;
 	            slv_reg13 <= slv_reg13;
-	            --slv_reg14 <= slv_reg14;
+	            slv_reg14 <= slv_reg14;
 	            slv_reg15 <= slv_reg15;
 	            slv_reg16 <= slv_reg16;
 	            slv_reg17 <= slv_reg17;
 	            slv_reg18 <= slv_reg18;
-	            --slv_reg19 <= slv_reg19;
+	            slv_reg19 <= slv_reg19;
 	            slv_reg20 <= slv_reg20;
-	            slv_reg21 <= slv_reg21;
+	            --slv_reg21 <= slv_reg21;
 	            slv_reg22 <= slv_reg22;
 	            slv_reg23 <= slv_reg23;
-	            --slv_reg24 <= slv_reg24;
+	            slv_reg24 <= slv_reg24;
 	            slv_reg25 <= slv_reg25;
 	            slv_reg26 <= slv_reg26;
 	            slv_reg27 <= slv_reg27;
