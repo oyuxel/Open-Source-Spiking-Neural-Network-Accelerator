@@ -292,6 +292,8 @@ architecture dance_me_to_the_end_of_love of NMC is
     signal LATCH_FINISHED       : std_logic := '0';
     signal SPK_VLD_PULSE        : std_logic := '0';
 
+    signal TCAS_RST : std_logic;
+
 begin
 
     CURRENT_RESOURCES_RELEASED <= CH_RESOURCES_RELEASED;
@@ -358,10 +360,12 @@ begin
         END IF;
     END PROCESS;
 
+    TCAS_RST <= NMC_STATE_RST or REFRACTORY_FLAG;
+
     TCAST : SS_2_HP
     Port Map(
         CLK     => NMC_CLK,
-        RST     => NMC_STATE_RST or REFRACTORY_FLAG,
+        RST     => TCAS_RST,
         SS_IN   => PARTIAL_CURRENT_IN,
         HP_OUT  => HP_OUT_REG,
         START   => PARTIAL_CURRENT_VLD,
