@@ -12,11 +12,13 @@ entity DATA_MUX is
         CROSSBAR_ROW_WIDTH      : integer := 16;
         CROSSBAR_COL_WIDTH      : integer := 16;
         SYNAPTIC_MEMORY_AWIDTH  : integer := 16;
-        PARAMETER_MEMORY_AWIDTH : integer := 16
+        PARAMETER_MEMORY_AWIDTH : integer := 16;
+        NUMBER_OF_SLAVES        : integer := 32;
+        SELECT_SLAVE_PORT_WIDTH : integer := 5
     );
     Port 
         ( 
-        SELECT_SLAVE                : in   std_logic_vector(31 downto 0);
+        SELECT_SLAVE                : in   std_logic_vector(SELECT_SLAVE_PORT_WIDTH-1 downto 0);
         -- DMA BRAM Port
         BRAM_ADDR                   : in   std_logic_vector(MAX_TARGET_BRAM_AWIDTH-1 downto 0);
         BRAM_DIN                    : in   std_logic_vector(MAX_TARGET_BRAM_DWIDTH-1 downto 0); 
@@ -72,40 +74,43 @@ end DATA_MUX;
 architecture cherry_blossom of DATA_MUX is
 
     signal BRAM_DOUT_INTERNAL : std_logic_vector(MAX_TARGET_BRAM_DWIDTH-1 downto 0);
+    signal SELECT_SLAVE_INT   : integer range 0 to NUMBER_OF_SLAVES-1;
 
 begin
+
+    SELECT_SLAVE_INT <= to_integer(unsigned(SELECT_SLAVE));
 
     -- ==========================================
     -- 1. Data to Spike Converter (SELECT_SLAVE = 0)
     -- ==========================================
-    D2S_DATA_IN_VLD <= FIFO_WREN             when SELECT_SLAVE = x"00000000" else '0';
-    D2S_DATA_IN     <= FIFO_DIN(31 downto 0) when SELECT_SLAVE = x"00000000" else (others => '0');
+    D2S_DATA_IN_VLD <= FIFO_WREN             when SELECT_SLAVE_INT = 0 else '0';
+    D2S_DATA_IN     <= FIFO_DIN(31 downto 0) when SELECT_SLAVE_INT = 0 else (others => '0');
 
     -- ==========================================
     -- 2. Input Spike Buffer (SELECT_SLAVE = 1)
     -- ==========================================
-    INPUT_SPIKE_BUFFER_WREN <= FIFO_WREN when SELECT_SLAVE = x"00000001" else '0';
-    INPUT_SPIKE_BUFFER_DIN  <= FIFO_DIN(CROSSBAR_ROW_WIDTH-1 downto 0) when SELECT_SLAVE = x"00000001" else (others => '0');
+    INPUT_SPIKE_BUFFER_WREN <= FIFO_WREN when SELECT_SLAVE_INT = 1 else '0';
+    INPUT_SPIKE_BUFFER_DIN  <= FIFO_DIN(CROSSBAR_ROW_WIDTH-1 downto 0) when SELECT_SLAVE_INT = 1 else (others => '0');
 
     -- ==========================================
     -- 3. Aux Spike Buffer (SELECT_SLAVE = 2)
     -- ==========================================
-    AUX_SPIKE_BUFFER_WREN <= FIFO_WREN when SELECT_SLAVE = x"00000002" else '0';
-    AUX_SPIKE_BUFFER_DIN  <= FIFO_DIN(CROSSBAR_ROW_WIDTH-1 downto 0) when SELECT_SLAVE = x"00000002" else (others => '0');
+    AUX_SPIKE_BUFFER_WREN <= FIFO_WREN when SELECT_SLAVE_INT = 2 else '0';
+    AUX_SPIKE_BUFFER_DIN  <= FIFO_DIN(CROSSBAR_ROW_WIDTH-1 downto 0) when SELECT_SLAVE_INT = 2 else (others => '0');
 
-    FIFO_FULL <= INPUT_SPIKE_BUFFER_FULL when SELECT_SLAVE = x"00000001" else 
-                 AUX_SPIKE_BUFFER_FULL   when SELECT_SLAVE = x"00000002" else '0';
+    FIFO_FULL <= INPUT_SPIKE_BUFFER_FULL when SELECT_SLAVE_INT = 1 else 
+                 AUX_SPIKE_BUFFER_FULL   when SELECT_SLAVE_INT = 2 else '0';
 
     -- ==========================================
     -- 4. Out Spike Buffer (SELECT_SLAVE = 3)
     -- ==========================================
-    OUT_SPIKE_BUFFER_RDEN <= FIFO_RDEN when SELECT_SLAVE = x"00000003" else '0';
-    FIFO_EMPTY            <= OUT_SPIKE_BUFFER_EMPTY when SELECT_SLAVE = x"00000003" else '1'; 
+    OUT_SPIKE_BUFFER_RDEN <= FIFO_RDEN when SELECT_SLAVE_INT = 3 else '0';
+    FIFO_EMPTY            <= OUT_SPIKE_BUFFER_EMPTY when SELECT_SLAVE_INT = 3 else '1'; 
 
-    process(SELECT_SLAVE, OUT_SPIKE_BUFFER_DOUT)
+    process(SELECT_SLAVE_INT, OUT_SPIKE_BUFFER_DOUT)
     begin
         FIFO_DOUT <= (others => '0'); 
-        if SELECT_SLAVE = x"00000003" then
+        if SELECT_SLAVE_INT = 3 then
             FIFO_DOUT(CROSSBAR_ROW_WIDTH-1 downto 0) <= OUT_SPIKE_BUFFER_DOUT;
         end if;
     end process;
@@ -113,25 +118,25 @@ begin
     -- ==========================================
     -- 5. NMC (SELECT_SLAVE = 4)
     -- ==========================================
-    NMC_NPARAM_DATA         <= BRAM_DIN(15 downto 0) when SELECT_SLAVE = x"00000004" else (others=>'0');
-    NMC_NPARAM_ADDR         <= BRAM_ADDR(9 downto 0) when SELECT_SLAVE = x"00000004" else (others=>'0');
-    NMC_PROG_MEM_PORTA_EN   <= '1'                   when SELECT_SLAVE = x"00000004" else '0';
-    NMC_PROG_MEM_PORTA_WEN  <= BRAM_WE               when SELECT_SLAVE = x"00000004" else '0';
+    NMC_NPARAM_DATA         <= BRAM_DIN(15 downto 0) when SELECT_SLAVE_INT = 4 else (others=>'0');
+    NMC_NPARAM_ADDR         <= BRAM_ADDR(9 downto 0) when SELECT_SLAVE_INT = 4 else (others=>'0');
+    NMC_PROG_MEM_PORTA_EN   <= '1'                   when SELECT_SLAVE_INT = 4 else '0';
+    NMC_PROG_MEM_PORTA_WEN  <= BRAM_WE               when SELECT_SLAVE_INT = 4 else '0';
 
     -- ==========================================
     -- 6. LEARN LUT (SELECT_SLAVE = 5)
     -- ==========================================
-    LEARN_LUT_DIN  <= BRAM_DIN(7 downto 0) when SELECT_SLAVE = x"00000005" else (others=>'0');
-    LEARN_LUT_ADDR <= BRAM_ADDR(LENGINE_LUT_AWIDTH-1 downto 0) when SELECT_SLAVE = x"00000005" else (others=>'0');
-    LEARN_LUT_EN   <= '1'       when SELECT_SLAVE = x"00000005" else '0';
-    LEARN_LUT_WREN  <= BRAM_WE               when SELECT_SLAVE = x"00000005" else '0';
+    LEARN_LUT_DIN  <= BRAM_DIN(7 downto 0) when SELECT_SLAVE_INT = 5 else (others=>'0');
+    LEARN_LUT_ADDR <= BRAM_ADDR(LENGINE_LUT_AWIDTH-1 downto 0) when SELECT_SLAVE_INT = 5 else (others=>'0');
+    LEARN_LUT_EN   <= '1'       when SELECT_SLAVE_INT = 5 else '0';
+    LEARN_LUT_WREN  <= BRAM_WE               when SELECT_SLAVE_INT = 5 else '0';
 
     BRAM_DOUT <= BRAM_DOUT_INTERNAL;
 
     -- =========================================================================
     -- 7. SYNAPTIC MEMORY & PARAMETER MEMORY DYNAMIC ROUTING PROCESS
     -- =========================================================================
-    process(SELECT_SLAVE, BRAM_DIN, BRAM_ADDR, BRAM_WE, SYNAPTIC_MEM_DOUT, PARAM_MEM_DOUT)
+    process(SELECT_SLAVE_INT, BRAM_DIN, BRAM_ADDR, BRAM_WE, SYNAPTIC_MEM_DOUT, PARAM_MEM_DOUT)
 
         variable slave_idx : integer;
 
@@ -149,7 +154,7 @@ begin
         
         BRAM_DOUT_INTERNAL <= (others => '0');
 
-        slave_idx := to_integer(unsigned(SELECT_SLAVE));
+        slave_idx := SELECT_SLAVE_INT;
 
         if (slave_idx >= 6) and (slave_idx < 6 + CROSSBAR_COL_WIDTH) then
 

@@ -109,6 +109,7 @@ architecture arch_imp of OSSNA is
         NEURAL_MEM_DEPTH             : integer := 1024;
         LEARNING_ENGINE_LUT_DEPTH    : integer := 2048;
         SPIKE_GENERATOR_BUFFER_DEPTH : integer := 2048;
+        SELECT_SLAVE_PORT_WIDTH      : integer := 5;
 		C_S_AXI_DATA_WIDTH	         : integer := 32;
 		C_S_AXI_ADDR_WIDTH	         : integer := 7
 		);
@@ -124,7 +125,7 @@ architecture arch_imp of OSSNA is
         BRAM_READ_DELAY            : out std_logic_vector(31 downto 0); 
         BRAM_BASEADDR              : out std_logic_vector(31 downto 0);
         DDR_BASEADDR               : out std_logic_vector(31 downto 0);
-		SELECT_SLAVE               : out std_logic_vector(31 downto 0);
+		SELECT_SLAVE               : out std_logic_vector(SELECT_SLAVE_PORT_WIDTH-1 downto 0);
 		AUX_BUFFER_MUX             : out std_logic;
 		D2S_RESET                  : out std_logic;
 		INPUT_SPIKE_MUX            : out std_logic;
@@ -294,11 +295,13 @@ architecture arch_imp of OSSNA is
         CROSSBAR_ROW_WIDTH      : integer := 16;
         CROSSBAR_COL_WIDTH      : integer := 16;
         SYNAPTIC_MEMORY_AWIDTH  : integer := 16;
-        PARAMETER_MEMORY_AWIDTH : integer := 16
+        PARAMETER_MEMORY_AWIDTH : integer := 16;
+        NUMBER_OF_SLAVES        : integer := 32;
+        SELECT_SLAVE_PORT_WIDTH : integer := 5
     );
     Port 
         ( 
-        SELECT_SLAVE                : in   std_logic_vector(31 downto 0);
+        SELECT_SLAVE                : in   std_logic_vector(SELECT_SLAVE_PORT_WIDTH-1 downto 0);
         BRAM_ADDR                   : in   std_logic_vector(MAX_TARGET_BRAM_AWIDTH-1 downto 0);
         BRAM_DIN                    : in   std_logic_vector(MAX_TARGET_BRAM_DWIDTH-1 downto 0); 
         BRAM_WE                     : in   std_logic;
@@ -344,7 +347,10 @@ architecture arch_imp of OSSNA is
 	constant MAX_BRAMDEPTH   : integer := FindMax(SYNAPSE_MEM_DEPTH,NEURAL_MEM_DEPTH,LEARNING_ENGINE_LUT_DEPTH);
 	constant MAX_BRAM_AWIDTH : integer := clogb2(MAX_BRAMDEPTH);
 
-    signal DATA_MUX_SELECT_SLAVE                : std_logic_vector(31 downto 0);
+    constant SLAVE_COUNT     : integer := 6+2*CROSSBAR_MATRIX_DIMENSIONS;
+    constant SLAVE_PORTWIDTH : integer := clogb2(SLAVE_COUNT);
+
+    signal DATA_MUX_SELECT_SLAVE                : std_logic_vector(SLAVE_PORTWIDTH-1 downto 0);
     signal DATA_MUX_BRAM_ADDR                   : std_logic_vector(MAX_BRAM_AWIDTH-1 downto 0);
     signal DATA_MUX_BRAM_DIN                    : std_logic_vector(31 downto 0); 
     signal DATA_MUX_BRAM_WE                     : std_logic;
@@ -645,6 +651,7 @@ OSSNA_CONTROLS : OSSNA_AXIL_CONTROLS
         NEURAL_MEM_DEPTH   => NEURAL_MEM_DEPTH,
         LEARNING_ENGINE_LUT_DEPTH => LEARNING_ENGINE_LUT_DEPTH,
         SPIKE_GENERATOR_BUFFER_DEPTH => SPIKE_GENERATOR_BUFFER_DEPTH,
+        SELECT_SLAVE_PORT_WIDTH => SLAVE_PORTWIDTH ,
 		C_S_AXI_DATA_WIDTH	=> C_AXIL_CONTROLS_DATA_WIDTH,
 		C_S_AXI_ADDR_WIDTH	=> C_AXIL_CONTROLS_ADDR_WIDTH
 	)
@@ -809,7 +816,9 @@ OSSNA_DATA : OSSNA_AXIM_DATA
         CROSSBAR_ROW_WIDTH      => CROSSBAR_MATRIX_DIMENSIONS,
         CROSSBAR_COL_WIDTH      => CROSSBAR_MATRIX_DIMENSIONS,
         SYNAPTIC_MEMORY_AWIDTH  => clogb2(SYNAPSE_MEM_DEPTH),
-        PARAMETER_MEMORY_AWIDTH => clogb2(NEURAL_MEM_DEPTH)
+        PARAMETER_MEMORY_AWIDTH => clogb2(NEURAL_MEM_DEPTH),
+        NUMBER_OF_SLAVES        => SLAVE_COUNT,
+        SELECT_SLAVE_PORT_WIDTH => SLAVE_PORTWIDTH 
     )
     Port Map 
         ( 
@@ -1054,7 +1063,7 @@ OSSNA_DATA : OSSNA_AXIM_DATA
     AUX_BUFFER_WREN_GATE <= CORE_NMC_SPIKE_OUT_VLD when CORE_WRITE_AUX_BUFFER = '1' else
                             '0';
 
-    AUX_BUFFER_FULL <= DATA_MUX_AUX_BUFFER_FULL;
+    DATA_MUX_AUX_BUFFER_FULL <= AUX_BUFFER_FULL;
 
     CIRCULAR_SPIKE_BUFFER : xpm_fifo_async_wrapper
     generic map(
@@ -1134,12 +1143,12 @@ OSSNA_DATA : OSSNA_AXIM_DATA
     );
 
     OUT_SPIKE_BUFFER_DIN  <= CORE_NMC_SPIKE_OUT ; 
-    OUT_SPIKE_BUFFER_WREN <= CORE_NMC_SPIKE_OUT_VLD when CORE_WRITE_OUT_BUFFER else
+    OUT_SPIKE_BUFFER_WREN <= CORE_NMC_SPIKE_OUT_VLD when CORE_WRITE_OUT_BUFFER = '1' else
                             '0';
 
     DATA_MUX_OUT_SPIKE_BUFFER_DOUT <= OUT_SPIKE_BUFFER_DOUT;
     DATA_MUX_OUT_SPIKE_BUFFER_EMPTY <= OUT_SPIKE_BUFFER_EMPTY;
-    DATA_MUX_OUT_SPIKE_BUFFER_RDEN <= DATA_MUX_OUT_SPIKE_BUFFER_RDEN;
+    OUT_SPIKE_BUFFER_RDEN         <= DATA_MUX_OUT_SPIKE_BUFFER_RDEN;
 
     IRQ_CONTROLLER : INTERRUPT_CONTROLLER
         Port Map( 

@@ -11,6 +11,7 @@ entity OSSNA_AXIL_CONTROLS is
         NEURAL_MEM_DEPTH    : integer := 1024;
         LEARNING_ENGINE_LUT_DEPTH : integer := 2048;
 		SPIKE_GENERATOR_BUFFER_DEPTH : integer := 2048;
+		SELECT_SLAVE_PORT_WIDTH     : integer := 5;
 		-- User parameters ends
 		-- Do not modify the parameters beyond this line
 
@@ -34,7 +35,7 @@ entity OSSNA_AXIL_CONTROLS is
         BRAM_BASEADDR              : out std_logic_vector(31 downto 0);
         DDR_BASEADDR               : out std_logic_vector(31 downto 0);
 		-- Data Mux Control Ports
-		SELECT_SLAVE               : out std_logic_vector(31 downto 0);
+		SELECT_SLAVE               : out std_logic_vector(SELECT_SLAVE_PORT_WIDTH-1 downto 0);
 		-- Spike Buffer External Access Muxes
 		AUX_BUFFER_MUX             : out std_logic;
 		-- Data Converter Control Ports
@@ -220,7 +221,7 @@ begin
 	TARGET_SELECT    <= slv_reg6(3);                    
     FIFO_TYPE        <= slv_reg6(4);   
 
-	SELECT_SLAVE    <= slv_reg7;   
+	SELECT_SLAVE    <= slv_reg7(SELECT_SLAVE_PORT_WIDTH-1 downto 0);   
     BYTE_PER_WORD   <= slv_reg8;
     TOTAL_BYTES     <= slv_reg9;
     TOTAL_WORDS     <= slv_reg10;

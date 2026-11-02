@@ -103,8 +103,15 @@ begin
                     IF S1_VALID = '1' THEN
                         S2_VALID <= '1';
                         
-                        val_shift := to_left(S1_MANT(21 downto 11));
-                        mant_shifted := shift_left(S1_MANT, val_shift);
+                        --val_shift := to_left(S1_MANT(21 downto 11));
+                        --mant_shifted := shift_left(S1_MANT, val_shift);
+                        if S1_MANT(21) = '1' then
+                            val_shift    := 0;
+                            mant_shifted := S1_MANT;
+                        else
+                            val_shift    := 1;
+                            mant_shifted := S1_MANT(20 downto 0) & '0';
+                        end if;
 
                         if S1_MULTEXP < 14 then
                             mult_exp_s1 := (others => '0');
@@ -159,18 +166,35 @@ begin
                             end if;
                         end if;
 
-                        if S1_SIGN = ac_sign then
-                            S2_SUMMANT <= op1_shifted + op2_shifted;
-                            S2_SUMSIGN <= S1_SIGN;
-                        else
-                            if op1_shifted >= op2_shifted then
-                                S2_SUMMANT <= op1_shifted - op2_shifted;
-                                S2_SUMSIGN <= S1_SIGN;
-                            else
-                                S2_SUMMANT <= op2_shifted - op1_shifted;
-                                S2_SUMSIGN <= ac_sign;
-                            end if;
-                        end if;
+                           if S1_SIGN = ac_sign then
+                               S2_SUMMANT <= op1_shifted + op2_shifted;
+                               S2_SUMSIGN <= S1_SIGN;
+                           elsif mult_exp_s2(4 downto 0) > ACCUMULATOR(14 downto 10) then
+                               S2_SUMMANT <= op1_shifted - op2_shifted;
+                               S2_SUMSIGN <= S1_SIGN;
+                           elsif mult_exp_s2(4 downto 0) < ACCUMULATOR(14 downto 10) then
+                               S2_SUMMANT <= op2_shifted - op1_shifted;
+                               S2_SUMSIGN <= ac_sign;
+                           elsif op1_mant >= op2_mant then       -- eşit exponent: kaydırılmamışları karşılaştır
+                               S2_SUMMANT <= op1_shifted - op2_shifted;
+                               S2_SUMSIGN <= S1_SIGN;
+                           else
+                               S2_SUMMANT <= op2_shifted - op1_shifted;
+                               S2_SUMSIGN <= ac_sign;
+                           end if;
+
+--                        if S1_SIGN = ac_sign then
+--                            S2_SUMMANT <= op1_shifted + op2_shifted;
+--                            S2_SUMSIGN <= S1_SIGN;
+--                        else
+--                            if op1_shifted >= op2_shifted then
+--                                S2_SUMMANT <= op1_shifted - op2_shifted;
+--                                S2_SUMSIGN <= S1_SIGN;
+--                            else
+--                                S2_SUMMANT <= op2_shifted - op1_shifted;
+--                                S2_SUMSIGN <= ac_sign;
+--                            end if;
+--                        end if;
                     ELSE
                         S2_VALID <= '0';
                     END IF;
@@ -189,7 +213,7 @@ begin
                             ACCUMULATOR <= S2_SUMSIGN & (S2_SUMEXP - lz) & shift_left(S2_SUMMANT(9 downto 0), lz);
                         end if;
                     END IF;
-
+  
                 END IF;
             END IF;
         END IF;
